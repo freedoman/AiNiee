@@ -243,6 +243,7 @@ class LanguageFilter(PluginBase):
             'es': self.has_any_latin,
             'fr': self.has_any_latin,
             'de': self.has_any_latin,
+            'pl': self.has_any_latin,
             # 韩语
             'ko': self.has_any_korean,
             # 俄语
