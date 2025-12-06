@@ -12,6 +12,7 @@ pair_en = {
     "french": "French",
     "german": "German",
     "spanish": "Spanish",
+    "polish": "Polish",
 }
 
 pair = {
@@ -24,6 +25,7 @@ pair = {
     "french": "法语",
     "german": "德语",
     "spanish": "西班牙语",
+    "polish": "波兰语",
 }
 
 
@@ -42,7 +44,8 @@ def map_language_code_to_name(language_code: str) -> str:
         "de": "german",
         "ko": "korean",
         "ru": "russian",
-        "ja": "japanese"
+        "ja": "japanese",
+        "pl": "polish",
     }
     return mapping.get(language_code, language_code)
 
@@ -58,7 +61,8 @@ def map_language_name_to_code(language_name: str) -> str:
         "german": "de",
         "korean": "ko",
         "russian": "ru",
-        "japanese": "ja"
+        "japanese": "ja",
+        "polish": "pl",
     }
     return mapping.get(language_name, language_name)
 
