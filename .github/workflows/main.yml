@@ -58,7 +58,7 @@ jobs:
         with:
           tag_name: Beta
           delete_release: true
-          github_token: ${{ secrets.build-action }}
+          github_token: ${{ secrets.FREEDOMAN }}
         continue-on-error: true
 
       - name: Create Release
@@ -71,4 +71,4 @@ jobs:
           prerelease: true
           generate_release_notes: true 
           files: AiNiee-Beta.zip
-          token: ${{ secrets.build-action }}
+          token: ${{ secrets.FREEDOMAN }}
