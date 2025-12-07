@@ -74,6 +74,14 @@ class LanguageFilter(PluginBase):
     CYRILLIC_SUPPLEMENTAL_EXTRA = ("\u2DE0", "\u2DFF")  # 其他扩展字符（例如：斯拉夫语言的一些符号）
     CYRILLIC_OTHER = ("\u0500", "\u050F")  # 其他字符区块（包括斯拉夫语系其他语言的字符，甚至一些特殊符号）
 
+    #阿拉伯语系
+    ARABIC_BASIC = ("\u0600", "\u06FF") # 基本阿拉伯文区块
+    ARABIC_SUPPLEMENTAL = ("\u0750", "\u077F") # 阿拉伯文补充，乌尔都语、信德语、克什米尔语等南亚语言的特定音素
+    ARABIC_EXTENDED_A = ("\u08A0", "\u08FF") # 阿拉伯文扩展-A, 历史文本使用的字母
+    ARABIC_EXTENDED_B = ("\u0870", "\u089F") # 阿拉伯文扩展-B, 非洲语言进一步扩展
+    ARABIC_DISPLAYED_A = ("\uFB50", "\uFDFF") # 阿拉伯文呈现形式, 预组连字和特殊形式
+    ARABIC_DISPLAYED_B = ("\uFE70", "\uFEFF") # 阿拉伯文呈现形式，位置变体选择符
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -196,6 +204,17 @@ class LanguageFilter(PluginBase):
                     1]
                 or LanguageFilter.CYRILLIC_OTHER[0] <= char <= LanguageFilter.CYRILLIC_OTHER[1]
         )
+    
+    # 判断字符是否为阿拉伯语字符
+    def is_arabic(self, char: str) -> bool:
+        return (
+                LanguageFilter.ARABIC_BASIC[0] <= char <= LanguageFilter.ARABIC_BASIC[1]
+                or LanguageFilter.ARABIC_SUPPLEMENTAL[0] <= char <=LanguageFilter.ARABIC_SUPPLEMENTAL[1]
+                or LanguageFilter.EXTENDED_A[0] <= char <= LanguageFilter.EXTENDED_A[1]
+                or LanguageFilter.EXTENDED_B[0] <= char <= LanguageFilter.EXTENDED_B[1]
+                or LanguageFilter.ARABIC_DISPLAYED_A[0] <= char <= LanguageFilter.ARABIC_DISPLAYED_A[1]
+                or LanguageFilter.ARABIC_DISPLAYED_B[0] <= char <= LanguageFilter.ARABIC_DISPLAYED_B[1]
+        )
 
     # 判断字符是否为日文（含汉字）字符
     def is_japanese(self, char: str) -> bool:
@@ -228,6 +247,10 @@ class LanguageFilter(PluginBase):
     # 检查字符串是否包含至少一个日文（含汉字）字符
     def has_any_japanese(self, text: str) -> bool:
         return any(self.is_japanese(char) for char in text)
+    
+    # 检查字符串是否包含至少一个乌尔都语
+    def has_any_arabic(self, text: str) -> bool:
+        return any(self.is_arabic(char) for char in text)
 
     def get_filter_function(self, language_code: str, path: str):
         """根据语言代码获取相应的语言过滤函数"""
@@ -249,7 +272,9 @@ class LanguageFilter(PluginBase):
             # 俄语
             'ru': self.has_any_russian,
             # 日语
-            'ja': self.has_any_japanese
+            'ja': self.has_any_japanese,
+            # 阿拉伯语系
+            'ur': self.has_any_arabic
         }
 
         # 尝试直接匹配

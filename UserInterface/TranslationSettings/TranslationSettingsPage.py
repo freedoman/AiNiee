@@ -90,6 +90,7 @@ class TranslationSettingsPage(QFrame, Base):
             (self.tra("繁中"), "chinese_traditional"),
             (self.tra("西班牙语"), "spanish"),
             (self.tra("波兰语"), "polish"),
+            (self.tra("乌尔都语"), "urdu"),
         ]
 
         # 生成翻译后的配对列表
@@ -146,6 +147,7 @@ class TranslationSettingsPage(QFrame, Base):
             (self.tra("法语"), "french"),
             (self.tra("西班牙语"), "spanish"),
             (self.tra("波兰语"), "polish"),
+            (self.tra("乌尔都语"), "urdu"),
         ]
 
         # 生成翻译后的配对列表

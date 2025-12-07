@@ -118,13 +118,11 @@ class PromptBuilder(Base):
             #conv_source_lang = TranslatorUtil.map_language_code_to_name(source_lang.most_common)
 
         # 检测原文语言是否能够构建动态示例
-        if conv_source_lang not in ["japanese", "korean", "russian", "chinese_simplified", "chinese_traditional", "french",
-                                "german", "spanish", "english", "indonesian","polish"]:
+        if conv_source_lang not in ["japanese", "korean", "russian", "chinese_simplified", "chinese_traditional", "french", "german", "spanish", "english", "indonesian", "polish", "urdu"]:
             return "", ""
 
         # 获取自适应示例（无法构建english的）
-        if conv_source_lang in ["japanese", "korean", "russian", "chinese_simplified", "chinese_traditional", "french",
-                                "german", "spanish", "indonesian","polish"]:
+        if conv_source_lang in ["japanese", "korean", "russian", "chinese_simplified", "chinese_traditional", "french", "german", "spanish", "indonesian", "polish", "urdu"]:
             list2, list4 = PromptBuilder.build_adaptive_translation_sample(config, input_dict, conv_source_lang)
 
         # 将两个列表合并
@@ -146,6 +144,7 @@ class PromptBuilder(Base):
                     "german": "Beispieltext",
                     "indonesian": "Contoh Teks",
                     "polish": "Przykładowy tekst",
+                    "urdu": "نمونہ متن",
                 }
             }
 
@@ -347,6 +346,10 @@ class PromptBuilder(Base):
                 r"[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+",
                 re.UNICODE
             ),
+            "urdu": re.compile(
+                r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+",
+                re.UNICODE
+            ),
             "indonesian": re.compile( # 印尼语的正则表达式
                 r"[a-zA-ZÀ-ÿ]+",      # 使用一个通用的拉丁字母匹配模式
                 re.UNICODE
@@ -366,6 +369,7 @@ class PromptBuilder(Base):
             "german": "Beispieltext",
             "indonesian": "Contoh Teks",
             "polish": "Przykładowy tekst",
+            "urdu": "نمونہ متن",
         }
 
         # 根据输入选择正则表达式与翻译文本
