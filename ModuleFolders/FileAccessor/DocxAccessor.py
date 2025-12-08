@@ -18,14 +18,31 @@ class DocxAccessor:
         for paragraph in xml_soup.find_all('w:p', recursive=True):
             self._merge_adjacent_same_style_run(paragraph)
         return xml_soup
-
+    
+    def read_footnotes(self, source_file_path: Path):
+        zipf = zipfile.ZipFile(source_file_path)
+        for item in zipf.infolist():
+            if item.filename == "word/footnotes.xml":
+                footnotes = zipf.read("word/footnotes.xml").decode("utf-8")
+                xml_soup = BeautifulSoup(footnotes, "xml")
+                for paragraph in xml_soup.find_all('w:p', recursive=True):
+                    self._merge_adjacent_same_style_run(paragraph)
+                return xml_soup
+        return None
+    
     def write_content(
-        self, content: BeautifulSoup, write_file_path: Path,
+        self, content: BeautifulSoup, footnotes: BeautifulSoup, write_file_path: Path,
         source_file_path: Path,
     ):
+        data = {}
+        if content:
+            data["word/document.xml"] = str(content)
+        if footnotes:
+            data["word/footnotes.xml"] = str(footnotes)
         ZipUtil.replace_in_zip_file(
-            source_file_path, write_file_path, {"word/document.xml": str(content)}
+            source_file_path, write_file_path, data
         )
+
 
     def _get_style(self, run: Tag):
         rpr = run.find("w:rPr")

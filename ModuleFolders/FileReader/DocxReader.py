@@ -33,4 +33,13 @@ class DocxReader(BaseSourceReader):
             CacheItem(source_text=str(text)) for text in filtered_matches
             if not (text == "" or text == "\n" or text == " " or text == '\xa0')
         ]
+        
+        xml_soup_footnotes = self.file_accessor.read_footnotes(file_path)
+        if xml_soup_footnotes:
+            footnotes = xml_soup_footnotes.find_all('w:t')
+            filtered_matches_footnotes = (match.string for match in footnotes if isinstance(match.string, str) and match.string.strip())
+            items.extend(
+                CacheItem(source_text=str(text), extra={'footnote': 1}) for text in filtered_matches_footnotes
+                if not (text == "" or text == "\n" or text == " " or text == '\xa0')
+            )
         return CacheFile(items=items)
