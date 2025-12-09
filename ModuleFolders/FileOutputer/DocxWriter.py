@@ -34,7 +34,7 @@ class DocxWriter(BaseTranslatedWriter):
                         start_index = content_index + 1
                         break
 
-        
+        # 处理脚注内容，如果有的话
         footnotes = self.file_accessor.read_footnotes(source_file_path)
         if footnotes:
             start_index = 0
@@ -49,7 +49,8 @@ class DocxWriter(BaseTranslatedWriter):
                             match.string = footnotes_items[content_index].final_text
                             start_index = content_index + 1
                             break
-                    
+        
+        # 写入翻译结果到新的文件            
         self.file_accessor.write_content(
             content, footnotes, translation_file_path, source_file_path
         )

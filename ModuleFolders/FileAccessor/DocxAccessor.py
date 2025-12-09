@@ -20,20 +20,22 @@ class DocxAccessor:
         return xml_soup
     
     def read_footnotes(self, source_file_path: Path):
-        zipf = zipfile.ZipFile(source_file_path)
-        for item in zipf.infolist():
-            if item.filename == "word/footnotes.xml":
-                footnotes = zipf.read("word/footnotes.xml").decode("utf-8")
-                xml_soup = BeautifulSoup(footnotes, "xml")
-                for paragraph in xml_soup.find_all('w:p', recursive=True):
-                    self._merge_adjacent_same_style_run(paragraph)
-                return xml_soup
-        return None
+        with zipfile.ZipFile(source_file_path) as zipf:
+            for item in zipf.infolist():
+                # 查找是否有脚注文件
+                if item.filename == "word/footnotes.xml":
+                    footnotes = zipf.read("word/footnotes.xml").decode("utf-8")
+                    xml_soup = BeautifulSoup(footnotes, "xml")
+                    for paragraph in xml_soup.find_all('w:p', recursive=True):
+                        self._merge_adjacent_same_style_run(paragraph)
+                    return xml_soup
+            return None
     
     def write_content(
         self, content: BeautifulSoup, footnotes: BeautifulSoup, write_file_path: Path,
         source_file_path: Path,
     ):
+        # 准备要写入的文件数据
         data = {}
         if content:
             data["word/document.xml"] = str(content)

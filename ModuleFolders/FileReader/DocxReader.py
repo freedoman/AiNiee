@@ -34,6 +34,7 @@ class DocxReader(BaseSourceReader):
             if not (text == "" or text == "\n" or text == " " or text == '\xa0')
         ]
         
+        # 读取脚注内容，如果有的话
         xml_soup_footnotes = self.file_accessor.read_footnotes(file_path)
         if xml_soup_footnotes:
             footnotes = xml_soup_footnotes.find_all('w:t')
@@ -42,4 +43,6 @@ class DocxReader(BaseSourceReader):
                 CacheItem(source_text=str(text), extra={'footnote': 1}) for text in filtered_matches_footnotes
                 if not (text == "" or text == "\n" or text == " " or text == '\xa0')
             )
+            
+        # 返回缓存文件对象
         return CacheFile(items=items)
