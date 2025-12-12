@@ -13,6 +13,9 @@ from ModuleFolders.FileOutputer.BaseWriter import (
 class DocxWriter(BaseTranslatedWriter):
     def __init__(self, output_config: OutputConfig):
         super().__init__(output_config)
+        # 确保 merge_mode 默认为 True
+        if not hasattr(output_config, 'merge_mode'):
+            output_config.merge_mode = True
         self.file_accessor = DocxAccessor()
 
     def on_write_translated(
@@ -20,6 +23,24 @@ class DocxWriter(BaseTranslatedWriter):
         pre_write_metadata: PreWriteMetadata,
         source_file_path: Path = None,
     ):
+        """
+        固定接口：根据 OutputConfig 中的 merge_mode 动态选择行为
+        - merge_mode=False：逐run写入（原有逻辑）
+        - merge_mode=True（默认）：按段落合并写入（需与 Reader 的 merge_mode=True 配套使用）
+        """
+        merge_mode = getattr(self.output_config, 'merge_mode', True)
+        
+        if merge_mode:
+            # 合并段落模式
+            self._write_merged_paragraphs(translation_file_path, cache_file, source_file_path)
+        else:
+            # 默认逐run模式（原有逻辑）
+            self._write_individual_runs(translation_file_path, cache_file, source_file_path)
+
+    def _write_individual_runs(
+        self, translation_file_path: Path, cache_file: CacheFile, source_file_path: Path = None
+    ):
+        """逐个 run 写入（原有逻辑保持不变）"""
         content = self.file_accessor.read_content(source_file_path)
         start_index = 0
         # 根据 w:t 标签找到原文
@@ -54,7 +75,29 @@ class DocxWriter(BaseTranslatedWriter):
         self.file_accessor.write_content(
             content, footnotes, translation_file_path, source_file_path
         )
+
+    def _write_merged_paragraphs(
+        self, translation_file_path: Path, cache_file: CacheFile, source_file_path: Path = None
+    ):
+        """按合并段落写入翻译结果"""
+        # 重新读取 metadata（Writer 和 Reader 是独立实例）
+        _, run_mapping, xml_soup = self.file_accessor.read_and_get_runs(source_file_path)
         
+        # 提取翻译后的段落
+        translated_paragraphs = [
+            item.final_text for item in cache_file.items 
+            if item.extra.get('merged')
+        ]
+        
+        # 替换 XML 中的文本
+        self.file_accessor.write_merged_text(xml_soup, run_mapping, translated_paragraphs)
+        
+        # 写入文件
+        from ModuleFolders.FileAccessor import ZipUtil
+        ZipUtil.replace_in_zip_file(
+            source_file_path, translation_file_path, 
+            {"word/document.xml": str(xml_soup)}
+        )
 
     @classmethod
     def get_project_type(self):
