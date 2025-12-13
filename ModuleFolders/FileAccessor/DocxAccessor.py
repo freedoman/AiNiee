@@ -16,10 +16,11 @@ class DocxAccessor:
         # 默认选项：简化模式 conservative(保守)/balanced(平衡)/aggressive(激进)
         self.simplify_options = {
             "remove_colors": True,
-            "strip_spacing": "zeros",  # 'none' | 'zeros' | 'small'
+            "strip_spacing": "all",  # 'none' | 'zeros' | 'all'
+            "strip_char_width": "all",  # 'none' | 'default' | 'all'
             "enable_diff_log": True,
             "protect_vertalign": True,  # 保护上标/下标 run 不被合并
-            "simplify_mode": "balanced",  # conservative | balanced | aggressive
+            "simplify_mode": "aggressive",  # conservative | balanced | aggressive
             "merge_mode": True,  # 启用合并段落模式
             **(simplify_options or {})
         }
@@ -34,11 +35,12 @@ class DocxAccessor:
         # 步骤1: 基础清理（所有模式）
         content = self._remove_redundant_colors(content)
         content = self._deduplicate_font_sizes(content)
+        content = self._remove_char_width_attributes(content)
         content = self._remove_empty_format_blocks(content)
         
-        # 步骤2: 清理零值间距（仅 aggressive 模式）
+        # 步骤2: 清理间距属性（仅 aggressive 模式）
         if mode == "aggressive":
-            content = self._remove_zero_spacing(content)
+            content = self._remove_spacing_attributes(content)
         
         # 步骤3: 合并相同格式的 runs（conservative 模式跳过）
         if mode != "conservative":
@@ -71,22 +73,53 @@ class DocxAccessor:
         """删除空的 rPr 格式块"""
         return re.sub(r'<w:rPr>\s*</w:rPr>', '', content)
     
-    def _remove_zero_spacing(self, content: str) -> str:
-        """移除零值 spacing（aggressive 模式，需谨慎）"""
-        strip_spacing = self.simplify_options.get("strip_spacing", "zeros")
-        if strip_spacing != "zeros":
+    def _remove_char_width_attributes(self, content: str) -> str:
+        """清理字符宽度属性（w:w），提高 run 合并率
+        
+        w:w 控制字符宽度缩放：
+        - 100 = 默认宽度（100%）
+        - <100 = 压缩字符
+        - >100 = 拉伸字符
+        
+        根据 strip_char_width 配置：
+        - 'all': 删除所有 w:w 标签（aggressive 模式，最大合并率）
+        - 'default': 仅删除 w:w=100 的标签（推荐，低风险）
+        - 'none': 不删除任何 w:w（保留原始宽度）
+        """
+        strip_width = self.simplify_options.get("strip_char_width", "default")
+        if strip_width == "none":
             return content
         
-        try:
-            soup = BeautifulSoup(content, "xml")
-            for spacing in soup.find_all('w:spacing'):
-                val = spacing.get('w:val') or spacing.get('val')
-                parent_name = spacing.parent.name if spacing.parent else None
-                if val == '0' and parent_name == 'w:rPr':
-                    spacing.decompose()
-            return str(soup)
-        except Exception:
-            return re.sub(r'<w:spacing w:val="0"\s*/>', '', content)
+        # 使用正则表达式直接处理，避免 BeautifulSoup 序列化问题
+        if strip_width == "all":
+            # 删除所有 w:w 标签
+            return re.sub(r'<w:w[^>]*?/>', '', content)
+        elif strip_width == "default":
+            # 仅删除 w:w=100 的标签
+            return re.sub(r'<w:w\s+w:val="100"\s*/>', '', content)
+    
+    def _remove_spacing_attributes(self, content: str, mode: str = None) -> str:
+        """清理 spacing 属性
+        
+        参数:
+            content: XML 内容
+            mode: 清理模式（覆盖配置）
+                - 'all': 删除所有 run 级别的 w:spacing 标签
+                - 'zeros': 仅删除 spacing=0 的标签（默认）
+                - 'none': 不删除任何 spacing
+        """
+        strip_spacing = mode if mode is not None else self.simplify_options.get("strip_spacing", "zeros")
+        if strip_spacing == "none":
+            return content
+        
+        # 使用正则表达式处理 run 级别的 spacing（更可靠）
+        # run 级别的 spacing 只有 w:val 属性，段落级别的有 w:before/w:line 等
+        if strip_spacing == "all":
+            # 删除所有只包含 w:val 的 spacing（run 级别）
+            return re.sub(r'<w:spacing\s+w:val="[^"]*"\s*/>', '', content)
+        else:  # zeros
+            # 仅删除 w:val="0" 的 spacing
+            return re.sub(r'<w:spacing\s+w:val="0"\s*/>', '', content)
     
     def _merge_format_runs(self, content: str) -> str:
         """迭代合并相邻的相同格式 runs
@@ -115,7 +148,7 @@ class DocxAccessor:
         )
 
     def _merge_adjacent_format_runs(self, content: str) -> str:
-        """合并相邻的相同格式 run（保护上标/下标）"""
+        """合并相邻的相同格式 run（保护上标/下标和空格）"""
         pattern = r'(<w:r><w:rPr>([^<]*(?:<w:[^/>]+/>[^<]*)*?)</w:rPr><w:t[^>]*>([^<]*?)</w:t></w:r>)(\s*)(<w:r><w:rPr>\2</w:rPr><w:t[^>]*>([^<]*?)</w:t></w:r>)'
         
         def should_merge(format_str: str, spacing: str) -> bool:
@@ -131,7 +164,13 @@ class DocxAccessor:
         
         def replacer(m):
             if should_merge(m.group(2) or '', m.group(4)):
-                return f'<w:r><w:rPr>{m.group(2)}</w:rPr><w:t>{m.group(3)}{m.group(6)}</w:t></w:r>'
+                # 合并文本
+                merged_text = m.group(3) + m.group(6)
+                # 如果合并后的文本包含首尾空格，需要添加 xml:space="preserve"
+                if merged_text and (merged_text[0] == ' ' or merged_text[-1] == ' '):
+                    return f'<w:r><w:rPr>{m.group(2)}</w:rPr><w:t xml:space="preserve">{merged_text}</w:t></w:r>'
+                else:
+                    return f'<w:r><w:rPr>{m.group(2)}</w:rPr><w:t>{merged_text}</w:t></w:r>'
             return m.group(0)
         
         return re.sub(pattern, replacer, content, flags=re.DOTALL)
@@ -187,55 +226,40 @@ class DocxAccessor:
                     return xml_soup
             return None
 
-    def read_merged_text(self, source_file_path: Path, force_baseline: bool = False, paragraph_separator: str = "\n", join_empty: bool = False) -> str:
-        """读取并返回合并后的纯文本，便于批量翻译。
+    def read_paragraphs(self, source_file_path: Path, force_baseline: bool = False, 
+                       with_mapping: bool = False, skip_simplify: bool = False) -> tuple | list:
+        """读取段落文本，可选返回 run 映射关系。
 
-        行为：
-        - 将每个段落 (`w:p`) 中的所有 run (`w:t`) 文本按出现顺序合并为一个段落文本。
-        - 使用 `paragraph_separator` 作为段落之间的分隔（默认换行）。
-        - `join_empty=True` 时也会保留空段落（作为分隔符），否则跳过空段落。
+        Args:
+            source_file_path: DOCX 文件路径
+            force_baseline: 是否强制使用基线简化
+            with_mapping: 是否返回 run 映射信息（Writer 需要，Reader 不需要）
+            skip_simplify: 是否跳过 XML 简化（Writer 读取时使用，因为 Reader 已简化过）
 
-        返回：合并后的字符串（不会修改原始 docx）。
+        Returns:
+            - with_mapping=False: List[str] - 段落文本列表
+            - with_mapping=True: (paragraph_list, run_mapping, xml_soup)
+              * paragraph_list: List[str] - 段落文本列表
+              * run_mapping: List[Dict] - 每个段落的 run 映射信息
+              * xml_soup: BeautifulSoup - XML DOM 对象
         """
         with zipfile.ZipFile(source_file_path) as zipf:
             content = zipf.read("word/document.xml").decode("utf-8")
 
-        simplified_content = self._simplify_xml_content(content, source_file_path, force_baseline=force_baseline)
-
-        # 使用 BeautifulSoup 解析并按段落合并 run 文本
-        xml_soup = BeautifulSoup(simplified_content, 'xml')
-        paragraphs = []
-
-        for p in xml_soup.find_all('w:p', recursive=True):
-            # 收集段落中所有的文本节点（w:t）并按顺序拼接
-            texts = []
-            for t in p.find_all('w:t', recursive=True):
-                txt = t.get_text() or ''
-                texts.append(txt)
-            para_text = ''.join(texts)
-            if para_text or join_empty:
-                paragraphs.append(para_text)
-
-        if not paragraphs:
-            return ''
-
-        return paragraph_separator.join(paragraphs)
-
-    def read_and_get_runs(self, source_file_path: Path, force_baseline: bool = False) -> tuple:
-        """读取合并文本并记录每个 run 的映射，便于翻译后写回。
-
-        返回 (merged_text, run_mapping, xml_soup)，其中：
-        - merged_text: 按段落合并的纯文本
-        - run_mapping: List[Dict]，每个字典包含：
-          * 'tags': List[Tag] - 该段落的所有 w:t 标签
-          * 'original_texts': List[str] - 每个 run 的原始文本（用于精确匹配）
-          * 'boundary_marker': str - 边界标记分隔的文本（用于翻译）
-        - xml_soup: BeautifulSoup 解析后的 XML，用于后续写入
-        """
-        with zipfile.ZipFile(source_file_path) as zipf:
-            content = zipf.read("word/document.xml").decode("utf-8")
-
-        simplified_content = self._simplify_xml_content(content, source_file_path, force_baseline=force_baseline)
+        # Writer 读取时跳过简化（Reader 已简化过源文件）
+        if skip_simplify:
+            simplified_content = content
+        else:
+            simplified_content = self._simplify_xml_content(content, source_file_path, force_baseline=force_baseline)
+            # 若简化后有变化，写回源文件
+            if simplified_content != content:
+                self._print_simplify_stats("document.xml", content, simplified_content)
+                if self.simplify_options.get("enable_diff_log", True):
+                    try:
+                        self._write_diff_log(source_file_path, content, simplified_content)
+                    except Exception:
+                        pass
+                self._save_simplified_content(source_file_path, {"word/document.xml": simplified_content})
         xml_soup = BeautifulSoup(simplified_content, 'xml')
 
         paragraphs = []
@@ -259,15 +283,15 @@ class DocxAccessor:
             
             para_text = ''.join(original_texts)
             if para_text:  # 只保留非空段落
-                paragraphs.append(''.join(parts))  # 使用带标记的文本
-                run_mapping.append({
-                    'tags': t_tags,
-                    'original_texts': original_texts,
-                    'boundary_marker': ''.join(parts)
-                })
+                paragraphs.append(para_text)  # 直接使用纯文本
+                if with_mapping:  # 只在需要时保存映射信息
+                    run_mapping.append({
+                        'tags': t_tags,
+                        'original_texts': original_texts,
+                        'boundary_marker': ''.join(parts)
+                    })
 
-        merged_text = '\n'.join(paragraphs)
-        return merged_text, run_mapping, xml_soup
+        return (paragraphs, run_mapping, xml_soup) if with_mapping else paragraphs
 
     def _clean_extra_spaces(self, text: str) -> str:
         """清理文本中的多余空格"""
@@ -356,18 +380,24 @@ class DocxAccessor:
                 if not rfonts.get(attr):
                     rfonts[attr] = font
     
-    def write_merged_text(self, xml_soup, run_mapping: list, translated_paragraphs: list) -> None:
-        """根据翻译后的段落文本和 run 映射，替换 XML 中的文本内容。
+    def write_paragraphs(self, run_mapping: list, translated_paragraphs: list) -> None:
+        """将翻译后的段落文本写回到 XML DOM 中。
         
-        策略：
-        1. 优先尝试按边界标记分割（精确匹配，类似原始一对一替换）
-        2. 如果标记丢失，降级为保持空 run 为空 + 只替换有内容的 run
-        3. 最差情况，按比例分配
+        注意：此方法通过修改 run_mapping 中的 tags 来间接修改原始 xml_soup。
+        run_mapping 中的 tags 是 BeautifulSoup Tag 对象的引用，修改它们会自动
+        反映到调用 read_paragraphs() 时返回的 xml_soup 中。
+        
+        智能分配策略（按优先级）：
+        1. 边界标记分割 - 如果译文保留了 <RUNBND> 标记，精确映射到每个 run
+        2. 保持空 run - 如果标记丢失，保持原本为空的 run 为空，其他 run 按比例分配
+        3. 比例分配 - 按原文长度比例分配译文到各个 run
 
         Args:
-            xml_soup: BeautifulSoup 对象（来自 read_and_get_runs 返回值）
-            run_mapping: List[Dict]，每个字典包含 tags、original_texts、boundary_marker
-            translated_paragraphs: List[str]，翻译后的段落文本列表（与 run_mapping 长度相同）
+            run_mapping: List[Dict] - 段落的 run 映射信息
+                - 'tags': List[Tag] - BeautifulSoup Tag 对象的引用
+                - 'original_texts': List[str] - 原始文本
+                - 'boundary_marker': str - 带标记的文本
+            translated_paragraphs: List[str] - 翻译后的段落列表（与 run_mapping 一一对应）
         """
         if len(run_mapping) != len(translated_paragraphs):
             raise ValueError(f"run_mapping 长度 ({len(run_mapping)}) 与 translated_paragraphs 长度 ({len(translated_paragraphs)}) 不匹配")

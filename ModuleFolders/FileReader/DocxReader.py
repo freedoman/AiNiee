@@ -18,7 +18,6 @@ class DocxReader(BaseSourceReader):
         if not hasattr(input_config, 'merge_mode'):
             input_config.merge_mode = True
         self.file_accessor = DocxAccessor()
-        self.merged_text_metadata = None
 
     @classmethod
     def get_project_type(cls):
@@ -69,19 +68,12 @@ class DocxReader(BaseSourceReader):
 
     def _read_merged_paragraphs(self, file_path: Path) -> CacheFile:
         """按合并段落读取，每个段落作为一个 CacheItem"""
-        merged_text, run_mapping, xml_soup = self.file_accessor.read_and_get_runs(file_path)
+        paragraph_list = self.file_accessor.read_paragraphs(file_path)
         
-        # 保存元数据供后续写入
-        self.merged_text_metadata = {
-            'file_path': file_path,
-            'xml_soup': xml_soup,
-            'run_mapping': run_mapping
-        }
-        
-        # 构建 CacheItem 列表
+        # 构建 CacheItem 列表（每个段落一个 item）
         items = [
             CacheItem(source_text=para_text, extra={'para_index': i, 'merged': True})
-            for i, para_text in enumerate(merged_text.split('\n'))
+            for i, para_text in enumerate(paragraph_list)
             if para_text.strip()
         ]
         return CacheFile(items=items)

@@ -81,18 +81,21 @@ class DocxWriter(BaseTranslatedWriter):
     ):
         """按合并段落写入翻译结果"""
         # 重新读取 metadata（Writer 和 Reader 是独立实例）
-        _, run_mapping, xml_soup = self.file_accessor.read_and_get_runs(source_file_path)
+        # skip_simplify=True: Reader 已经简化过源文件，无需重复简化
+        _, run_mapping, xml_soup = self.file_accessor.read_paragraphs(
+            source_file_path, with_mapping=True, skip_simplify=True
+        )
         
-        # 提取翻译后的段落
+        # 提取翻译后的段落列表
         translated_paragraphs = [
             item.final_text for item in cache_file.items 
             if item.extra.get('merged')
         ]
         
-        # 替换 XML 中的文本
-        self.file_accessor.write_merged_text(xml_soup, run_mapping, translated_paragraphs)
+        # 将译文写回到 XML DOM（通过修改 run_mapping 中的 tags，自动修改 xml_soup）
+        self.file_accessor.write_paragraphs(run_mapping, translated_paragraphs)
         
-        # 写入文件
+        # 写入文件（xml_soup 已被 write_paragraphs 修改）
         from ModuleFolders.FileAccessor import ZipUtil
         ZipUtil.replace_in_zip_file(
             source_file_path, translation_file_path, 
