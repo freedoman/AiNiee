@@ -46,7 +46,6 @@ class DocxWriter(BaseTranslatedWriter):
         # 处理正文和脚注
         for xml_name in ['document', 'footnotes']:
             xml_soup = self.file_accessor.read_xml_soup(source_file_path, xml_name)
-            
             if xml_soup is None:
                 continue
                 
@@ -69,14 +68,9 @@ class DocxWriter(BaseTranslatedWriter):
                             start_index = content_index + 1
                             break
             
-            # 添加到写入列表
             files_to_replace[f"word/{xml_name}.xml"] = str(xml_soup)
         
-        # 批量写入所有文件
-        from ModuleFolders.FileAccessor import ZipUtil
-        ZipUtil.replace_in_zip_file(
-            source_file_path, translation_file_path, files_to_replace
-        )
+        self._write_files_to_docx(source_file_path, translation_file_path, files_to_replace)
 
     def _write_merged_paragraphs(
         self, translation_file_path: Path, cache_file: CacheFile, source_file_path: Path = None
@@ -90,7 +84,6 @@ class DocxWriter(BaseTranslatedWriter):
                 source_file_path, xml_name=xml_name, 
                 with_mapping=True, skip_simplify=True
             )
-            
             if result is None:
                 continue
                 
@@ -106,15 +99,14 @@ class DocxWriter(BaseTranslatedWriter):
             
             # 将译文写回到 XML DOM
             self.file_accessor.write_paragraphs(run_mapping, translated_paragraphs)
-            
-            # 添加到写入列表
             files_to_replace[f"word/{xml_name}.xml"] = str(xml_soup)
         
-        # 写入所有文件（正文 + 脚注）
+        self._write_files_to_docx(source_file_path, translation_file_path, files_to_replace)
+
+    def _write_files_to_docx(self, source_path: Path, target_path: Path, files: dict):
+        """将文件写入 DOCX（统一写入逻辑）"""
         from ModuleFolders.FileAccessor import ZipUtil
-        ZipUtil.replace_in_zip_file(
-            source_file_path, translation_file_path, files_to_replace
-        )
+        ZipUtil.replace_in_zip_file(source_path, target_path, files)
 
     @classmethod
     def get_project_type(self):
