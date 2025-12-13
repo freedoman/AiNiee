@@ -19,14 +19,16 @@ class DocxAccessor:
             "strip_spacing": "all",  # 'none' | 'zeros' | 'all'
             "strip_char_width": "all",  # 'none' | 'default' | 'all'
             "enable_diff_log": True,
+            "backup_before_simplify": True,  # 简化前自动备份源文件
             "protect_vertalign": True,  # 保护上标/下标 run 不被合并
             "simplify_mode": "aggressive",  # conservative | balanced | aggressive
             "merge_mode": True,  # 启用合并段落模式
+            "mark_italic_as_red": True,  # 将斜体文本标记为红色（便于识别强调内容）
             **(simplify_options or {})
         }
 
-    def _simplify_xml_content(self, content: str, source_file_path: Path | None = None, force_baseline: bool = False) -> str:
-        """简化 XML 内容，移除冗余标签"""
+    def _preprocess_xml_content(self, content: str, source_file_path: Path | None = None, force_baseline: bool = False) -> str:
+        """预处理 XML 内容：简化冗余标签 + 格式标准化"""
         if force_baseline:
             return self._apply_baseline_simplify(content)
         
@@ -48,6 +50,10 @@ class DocxAccessor:
         
         # 步骤4: 合并连续空格（所有模式安全）
         content = self._merge_consecutive_spaces(content)
+        
+        # 步骤5: 将斜体文本标记为红色（便于识别强调内容）
+        if self.simplify_options.get("mark_italic_as_red", True):
+            content = self._mark_italic_runs_red(content)
         
         return content
     
@@ -147,6 +153,64 @@ class DocxAccessor:
             content
         )
 
+    def _mark_italic_runs_red(self, content: str) -> str:
+        """将包含斜体标记的 run 文本设置为红色（保留斜体标记）
+        
+        这样做的目的：
+        1. 保留原文中的强调信息（斜体通常用于强调）
+        2. 叠加红色标记，使斜体内容更醒目
+        3. 便于译者识别需要特别注意的强调内容
+        """
+        soup = BeautifulSoup(content, 'xml')
+        modified = False
+        
+        for run in soup.find_all('w:r'):
+            rpr = run.find('w:rPr')
+            if not rpr:
+                continue
+            
+            # 检查是否有斜体标记（w:i 或 w:iCs）
+            italic = rpr.find('w:i')
+            italic_cs = rpr.find('w:iCs')  # 复杂字体斜体
+            
+            if italic or italic_cs:
+                # 添加或修改颜色为红色（保留斜体标记）
+                color = rpr.find('w:color')
+                if color:
+                    color['w:val'] = 'FF0000'
+                else:
+                    # 创建新的颜色标签并插入到 rPr 开头
+                    color_tag = soup.new_tag('w:color')
+                    color_tag['w:val'] = 'FF0000'
+                    rpr.insert(0, color_tag)
+                
+                modified = True
+        
+        return str(soup) if modified else content
+
+    def _is_italic_marked_run(self, t_tag: Tag) -> bool:
+        """检查 w:t 标签所在的 run 是否为红色斜体（已标记为不翻译内容）
+        
+        Returns:
+            bool - True 表示该 run 包含斜体标记和红色，应该保持不翻译
+        """
+        run = t_tag.find_parent('w:r')
+        if not run:
+            return False
+        
+        rpr = run.find('w:rPr')
+        if not rpr:
+            return False
+        
+        # 检查是否有斜体标记
+        has_italic = rpr.find('w:i') is not None or rpr.find('w:iCs') is not None
+        
+        # 检查是否为红色
+        color = rpr.find('w:color')
+        is_red = color is not None and color.get('w:val', '').upper() == 'FF0000'
+        
+        return has_italic and is_red
+
     def _merge_adjacent_format_runs(self, content: str) -> str:
         """合并相邻的相同格式 run（保护上标/下标和空格）"""
         pattern = r'(<w:r><w:rPr>([^<]*(?:<w:[^/>]+/>[^<]*)*?)</w:rPr><w:t[^>]*>([^<]*?)</w:t></w:r>)(\s*)(<w:r><w:rPr>\2</w:rPr><w:t[^>]*>([^<]*?)</w:t></w:r>)'
@@ -175,122 +239,130 @@ class DocxAccessor:
         
         return re.sub(pattern, replacer, content, flags=re.DOTALL)
 
-    def read_content(self, source_file_path: Path, force_baseline: bool = False):
-        with zipfile.ZipFile(source_file_path) as zipf:
-            content = zipf.read("word/document.xml").decode("utf-8")
+    def _read_xml_from_docx(self, source_file_path: Path, xml_name: str) -> str | None:
+        """从 DOCX 文件读取 XML 内容
         
-        # 先对 XML 进行简化（传入源路径以便日志，force_baseline 用于诊断）
-        simplified_content = self._simplify_xml_content(content, source_file_path, force_baseline=force_baseline)
+        Args:
+            source_file_path: DOCX 文件路径
+            xml_name: XML 文件名（'document' 或 'footnotes'）
+        
+        Returns:
+            str | None - XML 内容字符串，文件不存在返回 None
+        """
+        xml_path = f"word/{xml_name}.xml"
+        with zipfile.ZipFile(source_file_path) as zipf:
+            if xml_path not in zipf.namelist():
+                return None
+            return zipf.read(xml_path).decode("utf-8")
 
-        # 如果简化后有变化，立即保存到源文件
+    def _read_and_simplify_xml(self, source_file_path: Path, xml_name: str, 
+                              force_baseline: bool = False) -> str | None:
+        """读取并简化 XML，返回简化后内容或 None（文件不存在）"""
+        content = self._read_xml_from_docx(source_file_path, xml_name)
+        if content is None:
+            return None
+        
+        # 预处理 XML 内容（简化 + 格式标准化）
+        simplified_content = self._preprocess_xml_content(content, source_file_path, force_baseline=force_baseline)
+        
+        # 若简化后有变化，备份并写回源文件
         if simplified_content != content:
-            self._print_simplify_stats("document.xml", content, simplified_content)
+            xml_path = f"word/{xml_name}.xml"
+            self._print_simplify_stats(f"{xml_name}.xml", content, simplified_content)
             if self.simplify_options.get("enable_diff_log", True):
                 try:
                     self._write_diff_log(source_file_path, content, simplified_content)
                 except Exception:
                     pass
-            self._save_simplified_content(source_file_path, {"word/document.xml": simplified_content})
+            
+            # 备份原文件
+            if self.simplify_options.get("backup_before_simplify", True):
+                self._backup_file(source_file_path)
+            
+            self._save_simplified_content(source_file_path, {xml_path: simplified_content})
         
-        # 读取xml内容
-        xml_soup = BeautifulSoup(simplified_content, 'xml')
+        return simplified_content
 
-        # 遍历每个段落并合并相邻且格式相同的 run
-        for paragraph in xml_soup.find_all('w:p', recursive=True):
-            self._merge_adjacent_same_style_run(paragraph)
-        return xml_soup
-    
-    def read_footnotes(self, source_file_path: Path, force_baseline: bool = False):
-        with zipfile.ZipFile(source_file_path) as zipf:
-            for item in zipf.infolist():
-                # 查找是否有脚注文件
-                if item.filename == "word/footnotes.xml":
-                    footnotes = zipf.read("word/footnotes.xml").decode("utf-8")
-                    
-                    # 先对 XML 进行简化（传入源路径以便日志，force_baseline 用于诊断）
-                    simplified_footnotes = self._simplify_xml_content(footnotes, source_file_path, force_baseline=force_baseline)
-                    
-                    # 如果简化后有变化，立即保存到源文件
-                    if simplified_footnotes != footnotes:
-                        self._print_simplify_stats("footnotes.xml", footnotes, simplified_footnotes)
-                        if self.simplify_options.get("enable_diff_log", True):
-                            try:
-                                self._write_diff_log(source_file_path, footnotes, simplified_footnotes)
-                            except Exception:
-                                pass
-                        self._save_simplified_content(source_file_path, {"word/footnotes.xml": simplified_footnotes})
-                    
-                    xml_soup = BeautifulSoup(simplified_footnotes, "xml")
-                    for paragraph in xml_soup.find_all('w:p', recursive=True):
-                        self._merge_adjacent_same_style_run(paragraph)
-                    return xml_soup
-            return None
-
-    def read_paragraphs(self, source_file_path: Path, force_baseline: bool = False, 
-                       with_mapping: bool = False, skip_simplify: bool = False) -> tuple | list:
-        """读取段落文本，可选返回 run 映射关系。
+    def read_xml_soup(self, source_file_path: Path, xml_name: str = 'document', 
+                     force_baseline: bool = False) -> BeautifulSoup | None:
+        """读取 XML 并返回 BeautifulSoup 对象（用于 individual run 模式）。
 
         Args:
             source_file_path: DOCX 文件路径
+            xml_name: 要读取的 XML 文件名（'document' 或 'footnotes'）
             force_baseline: 是否强制使用基线简化
-            with_mapping: 是否返回 run 映射信息（Writer 需要，Reader 不需要）
-            skip_simplify: 是否跳过 XML 简化（Writer 读取时使用，因为 Reader 已简化过）
 
         Returns:
-            - with_mapping=False: List[str] - 段落文本列表
-            - with_mapping=True: (paragraph_list, run_mapping, xml_soup)
-              * paragraph_list: List[str] - 段落文本列表
-              * run_mapping: List[Dict] - 每个段落的 run 映射信息
-              * xml_soup: BeautifulSoup - XML DOM 对象
+            BeautifulSoup | None - XML DOM 对象（文件不存在返回 None）
         """
-        with zipfile.ZipFile(source_file_path) as zipf:
-            content = zipf.read("word/document.xml").decode("utf-8")
+        simplified_content = self._read_and_simplify_xml(source_file_path, xml_name, force_baseline)
+        if simplified_content is None:
+            return None
+        
+        return BeautifulSoup(simplified_content, 'xml')
 
-        # Writer 读取时跳过简化（Reader 已简化过源文件）
+    def read_paragraphs(self, source_file_path: Path, xml_name: str = 'document', 
+                       with_mapping: bool = False, skip_simplify: bool = False) -> list[str] | tuple[list[str], list[dict], BeautifulSoup] | None:
+        """读取段落文本列表（用于 merged paragraph 模式）。
+
+        Args:
+            source_file_path: DOCX 文件路径
+            xml_name: 要读取的 XML 文件名（'document' 或 'footnotes'）
+            with_mapping: 是否返回 run 映射（Writer 需要）
+            skip_simplify: 是否跳过简化（Writer 读取时使用，Reader 已简化过）
+
+        Returns:
+            - with_mapping=False: List[str] | None - 段落文本列表
+            - with_mapping=True: (paragraph_list, run_mapping, xml_soup) | None
+        """
+        # 根据 skip_simplify 决定是否简化
         if skip_simplify:
-            simplified_content = content
+            content = self._read_xml_from_docx(source_file_path, xml_name)
+            if content is None:
+                return None
+            xml_soup = BeautifulSoup(content, 'xml')
         else:
-            simplified_content = self._simplify_xml_content(content, source_file_path, force_baseline=force_baseline)
-            # 若简化后有变化，写回源文件
-            if simplified_content != content:
-                self._print_simplify_stats("document.xml", content, simplified_content)
-                if self.simplify_options.get("enable_diff_log", True):
-                    try:
-                        self._write_diff_log(source_file_path, content, simplified_content)
-                    except Exception:
-                        pass
-                self._save_simplified_content(source_file_path, {"word/document.xml": simplified_content})
-        xml_soup = BeautifulSoup(simplified_content, 'xml')
-
+            simplified_content = self._read_and_simplify_xml(source_file_path, xml_name)
+            if simplified_content is None:
+                return None
+            xml_soup = BeautifulSoup(simplified_content, 'xml')
+        
         paragraphs = []
-        run_mapping = []  # 每个段落对应的结构化信息
-
+        run_mapping = [] if with_mapping else None
+        
         for p in xml_soup.find_all('w:p', recursive=True):
             t_tags = p.find_all('w:t', recursive=True)
             if not t_tags:
                 continue
             
-            # 收集每个 run 的原始文本
             original_texts = [t.get_text() or '' for t in t_tags]
             
-            # 生成带边界标记的文本（只在非空 run 之间插入标记）
+            # 生成带边界标记的文本（用于翻译）
             parts = []
             for i, text in enumerate(original_texts):
-                if text:  # 只添加非空文本
-                    if parts:  # 如果不是第一个非空run，添加边界标记
+                if text:
+                    # 先添加边界标记（除了第一个）
+                    if parts:
                         parts.append(f'<RUNBND{i}>')
-                    parts.append(text)
+                    
+                    # 然后添加文本，如果是红色斜体则用 <NOTRANS> 包裹
+                    if self._is_italic_marked_run(t_tags[i]):
+                        parts.append(f'<NOTRANS>{text}</NOTRANS>')
+                    else:
+                        parts.append(text)
             
-            para_text = ''.join(original_texts)
-            if para_text:  # 只保留非空段落
-                paragraphs.append(para_text)  # 直接使用纯文本
-                if with_mapping:  # 只在需要时保存映射信息
+            boundary_text = ''.join(parts)
+            
+            if boundary_text:
+                paragraphs.append(boundary_text)
+                
+                if with_mapping:
                     run_mapping.append({
                         'tags': t_tags,
                         'original_texts': original_texts,
-                        'boundary_marker': ''.join(parts)
+                        'boundary_marker': boundary_text
                     })
-
+        
         return (paragraphs, run_mapping, xml_soup) if with_mapping else paragraphs
 
     def _clean_extra_spaces(self, text: str) -> str:
@@ -409,9 +481,13 @@ class DocxAccessor:
             if not tags:
                 continue
 
-            # 策略1：尝试按边界标记分割（最精确）
-            # 检查译文中是否保留了边界标记
             import re
+            
+            # 预处理：移除 <NOTRANS> 标记（保留内容）
+            # 这些标记已经完成使命（告诉翻译模型不翻译），写入时直接移除
+            translated_text = re.sub(r'<NOTRANS>(.*?)</NOTRANS>', r'\1', translated_text)
+            
+            # 策略1：尝试按边界标记分割（最精确）
             boundary_pattern = r'<RUNBND\d+>'
             markers_in_translation = re.findall(boundary_pattern, translated_text)
             
@@ -436,8 +512,7 @@ class DocxAccessor:
                         self._set_tag_text(tag, '', preserve_space=True)
                 continue
             
-            # 策略2：标记丢失，保持空 run 为空，只对有文本的 run 进行处理
-            # 移除所有标记（如果有残留）
+            # 策略2：标记丢失，移除边界标记
             cleaned_text = re.sub(boundary_pattern, '', translated_text)
             
             # 清理多余空格
@@ -501,7 +576,28 @@ class DocxAccessor:
             for i, tag in enumerate(tags):
                 if i not in non_empty_indices:
                     self._set_tag_text(tag, '', preserve_space=True)
-    
+    def _backup_file(self, file_path: Path):
+        """备份文件到同目录下，在文件名中添加 .backup 标记
+        
+        备份策略：
+        - 如果已存在备份文件，不重复备份（保留首次备份）
+        - 备份文件命名格式：原文件名.backup.docx
+        - 示例：document.docx -> document.backup.docx
+        """
+        try:
+            # 构建备份文件名：在扩展名前插入 .backup
+            backup_path = file_path.with_stem(file_path.stem + '.backup')
+            
+            # 如果备份已存在，不重复备份
+            if backup_path.exists():
+                return
+            
+            # 复制文件到备份路径
+            shutil.copy2(str(file_path), str(backup_path))
+        except Exception:
+            # 备份失败不影响主流程
+            pass
+
     def _save_simplified_content(self, file_path: Path, data: dict):
         """保存简化后的内容到源文件"""
         # 使用临时文件避免同时读写同一文件导致损坏
@@ -517,6 +613,7 @@ class DocxAccessor:
             # 如果出错，删除临时文件
             if tmp_path.exists():
                 tmp_path.unlink()
+            raise e_path.unlink()
             raise e
     
     def _print_simplify_stats(self, file_name: str, original: str, simplified: str):

@@ -40,66 +40,80 @@ class DocxWriter(BaseTranslatedWriter):
     def _write_individual_runs(
         self, translation_file_path: Path, cache_file: CacheFile, source_file_path: Path = None
     ):
-        """逐个 run 写入（原有逻辑保持不变）"""
-        content = self.file_accessor.read_content(source_file_path)
-        start_index = 0
-        # 根据 w:t 标签找到原文
-        paragraphs = content.find_all("w:t")
-        content_items = [ item for item in cache_file.items if not item.extra.get('footnote')]
-        for match in paragraphs:
-            if isinstance(match.string, str) and match.string.strip():
-                # 在翻译结果中查找是否存在原文，存在则替换并右移开始下标
-                for content_index in range(start_index, len(content_items)):
-                    if match.string == content_items[content_index].source_text:
-                        match.string = content_items[content_index].final_text
-                        start_index = content_index + 1
-                        break
-
-        # 处理脚注内容，如果有的话
-        footnotes = self.file_accessor.read_footnotes(source_file_path)
-        if footnotes:
+        """逐个 run 写入（修改所有 w:t 标签）"""
+        files_to_replace = {}
+        
+        # 处理正文和脚注
+        for xml_name in ['document', 'footnotes']:
+            xml_soup = self.file_accessor.read_xml_soup(source_file_path, xml_name)
+            
+            if xml_soup is None:
+                continue
+                
+            is_footnote = (xml_name == 'footnotes')
+            
+            # 筛选对应的翻译项
+            items = [
+                item for item in cache_file.items 
+                if bool(item.extra.get('footnote')) == is_footnote
+            ]
+            
+            # 遍历所有 w:t 标签并替换
             start_index = 0
-            # 根据 w:t 标签找到原文
-            paragraphs = footnotes.find_all("w:t")
-            footnotes_items = [ item for item in cache_file.items if item.extra.get('footnote')]
-            for match in paragraphs:
+            for match in xml_soup.find_all("w:t"):
                 if isinstance(match.string, str) and match.string.strip():
-                    # 在翻译结果中查找是否存在原文，存在则替换并右移开始下标
-                    for content_index in range(start_index, len(footnotes_items)):
-                        if match.string == footnotes_items[content_index].source_text:
-                            match.string = footnotes_items[content_index].final_text
+                    # 查找匹配的翻译项
+                    for content_index in range(start_index, len(items)):
+                        if match.string == items[content_index].source_text:
+                            match.string = items[content_index].final_text
                             start_index = content_index + 1
                             break
+            
+            # 添加到写入列表
+            files_to_replace[f"word/{xml_name}.xml"] = str(xml_soup)
         
-        # 写入翻译结果到新的文件            
-        self.file_accessor.write_content(
-            content, footnotes, translation_file_path, source_file_path
+        # 批量写入所有文件
+        from ModuleFolders.FileAccessor import ZipUtil
+        ZipUtil.replace_in_zip_file(
+            source_file_path, translation_file_path, files_to_replace
         )
 
     def _write_merged_paragraphs(
         self, translation_file_path: Path, cache_file: CacheFile, source_file_path: Path = None
     ):
-        """按合并段落写入翻译结果"""
-        # 重新读取 metadata（Writer 和 Reader 是独立实例）
-        # skip_simplify=True: Reader 已经简化过源文件，无需重复简化
-        _, run_mapping, xml_soup = self.file_accessor.read_paragraphs(
-            source_file_path, with_mapping=True, skip_simplify=True
-        )
+        """按合并段落写入翻译结果，支持正文和脚注"""
+        files_to_replace = {}
         
-        # 提取翻译后的段落列表
-        translated_paragraphs = [
-            item.final_text for item in cache_file.items 
-            if item.extra.get('merged')
-        ]
+        # 处理正文和脚注
+        for xml_name in ['document', 'footnotes']:
+            result = self.file_accessor.read_paragraphs(
+                source_file_path, xml_name=xml_name, 
+                with_mapping=True, skip_simplify=True
+            )
+            
+            if result is None:
+                continue
+                
+            _, run_mapping, xml_soup = result
+            is_footnote = (xml_name == 'footnotes')
+            
+            # 提取对应的翻译段落
+            translated_paragraphs = [
+                item.final_text for item in cache_file.items
+                if item.extra.get('merged') and 
+                   bool(item.extra.get('footnote')) == is_footnote
+            ]
+            
+            # 将译文写回到 XML DOM
+            self.file_accessor.write_paragraphs(run_mapping, translated_paragraphs)
+            
+            # 添加到写入列表
+            files_to_replace[f"word/{xml_name}.xml"] = str(xml_soup)
         
-        # 将译文写回到 XML DOM（通过修改 run_mapping 中的 tags，自动修改 xml_soup）
-        self.file_accessor.write_paragraphs(run_mapping, translated_paragraphs)
-        
-        # 写入文件（xml_soup 已被 write_paragraphs 修改）
+        # 写入所有文件（正文 + 脚注）
         from ModuleFolders.FileAccessor import ZipUtil
         ZipUtil.replace_in_zip_file(
-            source_file_path, translation_file_path, 
-            {"word/document.xml": str(xml_soup)}
+            source_file_path, translation_file_path, files_to_replace
         )
 
     @classmethod

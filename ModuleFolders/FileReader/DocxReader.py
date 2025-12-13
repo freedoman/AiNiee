@@ -43,37 +43,59 @@ class DocxReader(BaseSourceReader):
             return self._read_individual_runs(file_path)
 
     def _read_individual_runs(self, file_path: Path) -> CacheFile:
-        """逐个 run 读取（原有逻辑保持不变）"""
-        xml_soup = self.file_accessor.read_content(file_path)
-        paragraphs = xml_soup.find_all('w:t')
-        # 过滤掉空的内容
-        filtered_matches = (match.string for match in paragraphs if isinstance(match.string, str) and match.string.strip())
-        items = [
-            CacheItem(source_text=str(text)) for text in filtered_matches
-            if not (text == "" or text == "\n" or text == " " or text == '\xa0')
-        ]
+        """逐个 run 读取（提取所有 w:t 标签的文本）"""
+        items = []
         
-        # 读取脚注内容，如果有的话
-        xml_soup_footnotes = self.file_accessor.read_footnotes(file_path)
-        if xml_soup_footnotes:
-            footnotes = xml_soup_footnotes.find_all('w:t')
-            filtered_matches_footnotes = (match.string for match in footnotes if isinstance(match.string, str) and match.string.strip())
-            items.extend(
-                CacheItem(source_text=str(text), extra={'footnote': 1}) for text in filtered_matches_footnotes
-                if not (text == "" or text == "\n" or text == " " or text == '\xa0')
+        # 读取正文和脚注
+        for xml_name in ['document', 'footnotes']:
+            xml_soup = self.file_accessor.read_xml_soup(file_path, xml_name)
+            
+            if xml_soup is None:
+                continue
+                
+            is_footnote = (xml_name == 'footnotes')
+            
+            # 提取所有 w:t 标签的文本
+            t_tags = xml_soup.find_all('w:t')
+            filtered_texts = (
+                match.string for match in t_tags 
+                if isinstance(match.string, str) and match.string.strip()
             )
             
-        # 返回缓存文件对象
+            # 创建 CacheItem
+            extra = {'footnote': 1} if is_footnote else {}
+            items.extend(
+                CacheItem(source_text=str(text), extra=extra) 
+                for text in filtered_texts
+                if text not in ("", "\n", " ", '\xa0')
+            )
+            
         return CacheFile(items=items)
 
     def _read_merged_paragraphs(self, file_path: Path) -> CacheFile:
         """按合并段落读取，每个段落作为一个 CacheItem"""
-        paragraph_list = self.file_accessor.read_paragraphs(file_path)
+        items = []
         
-        # 构建 CacheItem 列表（每个段落一个 item）
-        items = [
-            CacheItem(source_text=para_text, extra={'para_index': i, 'merged': True})
-            for i, para_text in enumerate(paragraph_list)
-            if para_text.strip()
-        ]
+        # 使用统一接口读取正文和脚注
+        for xml_name in ['document', 'footnotes']:
+            paragraph_list = self.file_accessor.read_paragraphs(
+                file_path, xml_name=xml_name
+            )
+            
+            if paragraph_list is None:
+                continue
+                
+            is_footnote = (xml_name == 'footnotes')
+            extra_base = {'merged': True, 'footnote': 1} if is_footnote else {'merged': True}
+            
+            # 构建 CacheItem 列表
+            items.extend(
+                CacheItem(
+                    source_text=para_text, 
+                    extra={**extra_base, 'para_index': i}
+                )
+                for i, para_text in enumerate(paragraph_list)
+                if para_text.strip()
+            )
+        
         return CacheFile(items=items)
