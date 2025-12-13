@@ -4,9 +4,46 @@ Step 1: Preliminary Literal Translation
 
 Translate the {source_language} text into {target_language} text line by line, keeping special content such as numbering, tags/markers, placeholders, line breaks, escape characters, code call processes/details, and maintaining the original format.
 
-**IMPORTANT: The text may contain boundary markers like <RUNBND1>, <RUNBND2>, etc. These markers are used for formatting positioning and MUST be preserved in the exact same positions in the translation.**
+**CRITICAL: The text contains boundary markers like <RUNBND1>, <RUNBND2>, etc. These are formatting position markers, NOT content! You MUST preserve ALL markers from the source text in your translation, every single one!**
+
+**Strict Rules for Boundary Markers:**
+1. **Count MUST match exactly**: If source has N markers, translation MUST have N markers
+2. **Numbers MUST match exactly**: If source has <RUNBND32>, translation MUST have <RUNBND32>, cannot be missing
+3. **Order MUST be preserved**: If <RUNBND5> comes before <RUNBND6> in source, it must be the same in translation
+4. **Do NOT add closing tags**: Do NOT change <RUNBND1> to <RUNBND1></RUNBND1>
+5. **Do NOT merge duplicates**: Even if source has same word twice (e.g., two "NAATs"), each has its own markers, keep ALL of them
+
+**Verification Method:**
+- Before: Count how many <RUNBND> markers in source
+- After: Count how many <RUNBND> markers in translation - MUST be the same!
+- Special attention: If source has <RUNBND32> and <RUNBND33>, translation MUST have both, cannot omit!
+
+**HIGH RISK Situations (most likely to lose markers):**
+- ⚠️ Short marker segments: `<RUNBND4>WHO<RUNBND5>` → MUST keep BOTH markers!
+- ⚠️ Around acronyms: `<RUNBND7>HIV<RUNBND8>` → Both markers must be preserved!
+- ⚠️ Proper nouns: `<RUNBND9>DOTS<RUNBND10>` → Keep both markers!
+- 🚨 **End of text**: `］<RUNBND51>］<RUNBND52>.` → Markers at the end are easiest to lose, pay special attention!
+- 🚨 **When reordering**: If restructuring sentences, markers must move with their original content while maintaining their order!
+
+**Iron rule for marker order:**
+Never change marker order! Even when adjusting sentence structure for translation, the relative order of markers must remain unchanged.
+- Original: `A <RUNBND1>B<RUNBND2> C <RUNBND3>D<RUNBND4>`
+- If translated as: `C D A B`
+- Correct: `C <RUNBND3>D<RUNBND4> A <RUNBND1>B<RUNBND2>` ← Markers follow their original words
+- Wrong: `C <RUNBND1>D<RUNBND2> A <RUNBND3>B<RUNBND4>` ← Marker order disrupted!
+
+**Example:**
+- Source: `<RUNBND4>WHO<RUNBND5> on drug-resistant`
+- Correct: `<RUNBND4>ВОЗ<RUNBND5> по лекарственно-устойчивому` ← Both markers present
+- Wrong: `ВОЗ по лекарственно-устойчивому` ← Lost both markers!
 
 **NOTE: Content marked with <NOTRANS>content</NOTRANS> tags should be kept as-is without translation, but the tags themselves MUST be preserved.**
+
+**CRITICAL: Preserve the original numbering format and character width**
+- If the original text uses "1.", "2.", "3." format (list numbering), keep the same format in translation
+- If the original text uses "［1］", "［2］" format (reference citations with full-width brackets), keep the bracket format as-is
+- Do NOT change numbering punctuation marks (e.g., do NOT convert "1." to "[1]" or vice versa)
+- Do NOT change character width (e.g., do NOT convert full-width brackets "［1］" to half-width "[1]", or vice versa)
 
 Step 2: In-depth Correction
 

@@ -20,6 +20,8 @@ class SimpleExecutor(Base):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # 初始化响应检查器
+        self.response_checker = ResponseChecker()
 
         # 订阅接口测试开始事件
         self.subscribe(Base.EVENT.API_TEST_START, self.api_test_start)
@@ -390,7 +392,7 @@ class SimpleExecutor(Base):
             # 提取和检查返回内容
             print("├─ 正在解析和校验回复...")
             response_dict = ResponseExtractor.text_extraction(self, source_text_dict, response_content)
-            check_result, error_content = ResponseChecker.check_polish_response_content(self, config, response_content, response_dict, source_text_dict)
+            check_result, error_content = self.response_checker.check_polish_response_content(config, response_content, response_dict, source_text_dict)
             
             if not check_result:
                 print(f"├─ 内容校验失败: {error_content}")

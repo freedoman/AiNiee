@@ -30,6 +30,7 @@ class TranslationSettingsPage(QFrame, Base):
                 "residual_original_text_check": True,
                 "newline_character_count_check": True,
                 "reply_format_check": False,
+                "boundary_marker_check": True
             },
         }
 
@@ -244,13 +245,17 @@ class TranslationSettingsPage(QFrame, Base):
             info_cont1 = self.tra("原文返回检查")
             info_cont2 = self.tra("翻译残留检查")
             info_cont3 = self.tra("换行符数检查")
-            info_cont4 = self.tra("回复格式强检查") 
+            info_cont4 = self.tra("回复格式强检查")
+            info_cont5 = self.tra("边界标记检查")
+            info_cont6 = self.tra("自动修复标记")
 
             pairs = [
                 (info_cont1, "return_to_original_text_check"),
                 (info_cont2, "residual_original_text_check"),
                 (info_cont3, "newline_character_count_check"),
                 (info_cont4, "reply_format_check"),
+                (info_cont5, "boundary_marker_check"),
+                (info_cont6, "auto_fix_markers"),
             ]
 
             for v in pairs:

@@ -363,7 +363,177 @@ class DocxAccessor:
                         'boundary_marker': boundary_text
                     })
         
+        # 智能合并不完整段落 - Reader 和 Writer 都需要执行以保持一致性
+        if with_mapping:
+            # 需要同时合并 paragraphs 和 run_mapping
+            paragraphs, run_mapping = self._merge_incomplete_paragraphs_with_mapping(paragraphs, run_mapping)
+        else:
+            paragraphs = self._merge_incomplete_paragraphs(paragraphs)
+        
         return (paragraphs, run_mapping, xml_soup) if with_mapping else paragraphs
+
+    def _merge_incomplete_paragraphs(self, paragraphs: list[str]) -> list[str]:
+        """智能合并被错误分割的段落
+        
+        检测以下情况并合并:
+        1. 段落以常见中文连接词结尾(但、而、且、或、因此等)
+        2. 段落以不完整动词短语结尾(可以X、能够X、将要X等)
+        3. 下一段落不以新起点标记开头(数字编号、标题等)
+        
+        Args:
+            paragraphs: 原始段落列表
+            
+        Returns:
+            合并后的段落列表
+        """
+        import re
+        
+        if len(paragraphs) <= 1:
+            return paragraphs
+        
+        # 中文不完整结尾模式
+        incomplete_patterns = [
+            r'[可以能将是在有][治疗做进行得到能够]$',  # 不完整动词短语
+            r'[，、；但而且或及以与和]$',  # 连接词
+            r'[的地得]$',  # 结构助词
+            r'[了着过]$',  # 动态助词(可疑)
+        ]
+        
+        # 新段落开始标记(这些段落不应该被合并到前面)
+        new_paragraph_patterns = [
+            r'^\d+[\.、]',  # 数字编号开头
+            r'^[一二三四五六七八九十]+[、．]',  # 中文数字编号
+            r'^[(（]\d+[)）]',  # 括号数字
+            r'^[A-Z][a-z]+\s',  # 英文标题开头
+            r'^[第章节]',  # 章节标记
+        ]
+        
+        merged = []
+        i = 0
+        
+        while i < len(paragraphs):
+            current = paragraphs[i]
+            
+            # 移除边界标记和NOTRANS标签后检查
+            clean_text = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', current)
+            
+            # 检查当前段落是否不完整
+            is_incomplete = False
+            for pattern in incomplete_patterns:
+                if re.search(pattern, clean_text):
+                    is_incomplete = True
+                    break
+            
+            # 如果不完整且有下一段落
+            if is_incomplete and i + 1 < len(paragraphs):
+                next_para = paragraphs[i + 1]
+                next_clean = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', next_para)
+                
+                # 检查下一段落是否是新起点
+                is_new_start = False
+                for pattern in new_paragraph_patterns:
+                    if re.match(pattern, next_clean):
+                        is_new_start = True
+                        break
+                
+                # 如果下一段落不是新起点,则合并
+                if not is_new_start:
+                    merged.append(current + next_para)
+                    i += 2  # 跳过下一段落
+                    continue
+            
+            # 否则保持原样
+            merged.append(current)
+            i += 1
+        
+        return merged
+
+    def _merge_incomplete_paragraphs_with_mapping(self, paragraphs: list[str], run_mapping: list[dict]) -> tuple[list[str], list[dict]]:
+        """智能合并被错误分割的段落(带 run_mapping 同步合并)
+        
+        与 _merge_incomplete_paragraphs 功能相同,但同时合并对应的 run_mapping
+        
+        Args:
+            paragraphs: 原始段落列表
+            run_mapping: 原始 run_mapping 列表
+            
+        Returns:
+            (合并后的段落列表, 合并后的 run_mapping 列表)
+        """
+        import re
+        
+        if len(paragraphs) <= 1:
+            return paragraphs, run_mapping
+        
+        # 中文不完整结尾模式
+        incomplete_patterns = [
+            r'[可以能将是在有][治疗做进行得到能够]$',  # 不完整动词短语
+            r'[，、；但而且或及以与和]$',  # 连接词
+            r'[的地得]$',  # 结构助词
+            r'[了着过]$',  # 动态助词(可疑)
+        ]
+        
+        # 新段落开始标记
+        new_paragraph_patterns = [
+            r'^\d+[\.、]',  # 数字编号开头
+            r'^[一二三四五六七八九十]+[、．]',  # 中文数字编号
+            r'^[(（]\d+[)）]',  # 括号数字
+            r'^[A-Z][a-z]+\s',  # 英文标题开头
+            r'^[第章节]',  # 章节标记
+        ]
+        
+        merged_paragraphs = []
+        merged_mapping = []
+        i = 0
+        
+        while i < len(paragraphs):
+            current = paragraphs[i]
+            current_map = run_mapping[i]
+            
+            # 移除边界标记和NOTRANS标签后检查
+            clean_text = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', current)
+            
+            # 检查当前段落是否不完整
+            is_incomplete = False
+            for pattern in incomplete_patterns:
+                if re.search(pattern, clean_text):
+                    is_incomplete = True
+                    break
+            
+            # 如果不完整且有下一段落
+            if is_incomplete and i + 1 < len(paragraphs):
+                next_para = paragraphs[i + 1]
+                next_map = run_mapping[i + 1]
+                next_clean = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', next_para)
+                
+                # 检查下一段落是否是新起点
+                is_new_start = False
+                for pattern in new_paragraph_patterns:
+                    if re.match(pattern, next_clean):
+                        is_new_start = True
+                        break
+                
+                # 如果下一段落不是新起点,则合并
+                if not is_new_start:
+                    # 合并段落文本
+                    merged_paragraphs.append(current + next_para)
+                    
+                    # 合并 run_mapping: 将两个段落的 tags 和 texts 合并
+                    merged_mapping.append({
+                        'tags': current_map['tags'] + next_map['tags'],
+                        'original_texts': current_map['original_texts'] + next_map['original_texts'],
+                        'boundary_marker': current + next_para
+                    })
+                    
+                    i += 2  # 跳过下一段落
+                    continue
+            
+            # 否则保持原样
+            merged_paragraphs.append(current)
+            merged_mapping.append(current_map)
+            i += 1
+        
+        return merged_paragraphs, merged_mapping
 
     def _clean_extra_spaces(self, text: str) -> str:
         """清理文本中的多余空格"""
@@ -576,6 +746,7 @@ class DocxAccessor:
             for i, tag in enumerate(tags):
                 if i not in non_empty_indices:
                     self._set_tag_text(tag, '', preserve_space=True)
+                    
     def _backup_file(self, file_path: Path):
         """备份文件到同目录下，在文件名中添加 .backup 标记
         

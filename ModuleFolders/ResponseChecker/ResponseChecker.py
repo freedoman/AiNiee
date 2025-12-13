@@ -4,7 +4,8 @@ from ModuleFolders.ResponseChecker.BaseChecks import (
     check_text_line_count,
     check_empty_response,
     check_dict_order,
-    contains_special_chars
+    contains_special_chars,
+    check_boundary_markers
 )
 
 from ModuleFolders.ResponseChecker.AdvancedChecks import (
@@ -15,9 +16,12 @@ from ModuleFolders.ResponseChecker.AdvancedChecks import (
     check_reply_format
 )
 
+from ModuleFolders.BoundaryMarkerAlternative.marker_fixer import BoundaryMarkerFixer
+
 class ResponseChecker():
     def __init__(self):
-        pass
+        # 初始化标记修复器
+        self.marker_fixer = BoundaryMarkerFixer(max_missing=3)
 
     def check_response_content(self, config, placeholder_order, response_str, response_dict, source_text_dict, source_lang):
 
@@ -41,6 +45,45 @@ class ResponseChecker():
         # 检查数字序号是否正确
         if not check_dict_order(source_text_dict, response_dict):
             return False, "【行数错误】 - 出现错行串行"
+
+        # 检查边界标记完整性
+        if response_check_switch.get('boundary_marker_check', True):
+            markers_ok, marker_error = check_boundary_markers(source_text_dict, response_dict)
+            if not markers_ok:
+                # 尝试自动修复标记错误
+                if response_check_switch.get('auto_fix_markers', True):
+                    fixed_count = 0
+                    fix_messages = []
+                    
+                    for key in source_text_dict.keys():
+                        if key in response_dict:
+                            success, fixed_text, fix_msg = self.marker_fixer.fix_markers(
+                                source_text_dict[key], 
+                                response_dict[key]
+                            )
+                            
+                            if success:
+                                response_dict[key] = fixed_text
+                                fixed_count += 1
+                                fix_messages.append(f"行{key}: {fix_msg}")
+                    
+                    # 如果有修复，重新检查
+                    if fixed_count > 0:
+                        markers_ok, marker_error = check_boundary_markers(source_text_dict, response_dict)
+                        if markers_ok:
+                            # 修复成功，记录日志但继续
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.info(f"自动修复了{fixed_count}处标记错误: {'; '.join(fix_messages[:3])}")
+                        else:
+                            # 修复后仍有错误
+                            return False, f"【标记错误】 - 自动修复失败: {marker_error}"
+                    else:
+                        # 无法自动修复
+                        return False, f"【标记错误】 - {marker_error}"
+                else:
+                    # 未启用自动修复
+                    return False, f"【标记错误】 - {marker_error}"
 
         # 进阶检查
         # 多行文本块检查

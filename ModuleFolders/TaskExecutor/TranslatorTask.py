@@ -31,6 +31,7 @@ class TranslatorTask(Base):
         self.plugin_manager = plugin_manager
         self.request_limiter = request_limiter
         self.text_processor = TextProcessor(self.config) # 文本处理器
+        self.response_checker = ResponseChecker() # 响应检查器
 
         # 源语言对象
         self.source_lang = source_lang
@@ -181,8 +182,7 @@ class TranslatorTask(Base):
         response_dict = ResponseExtractor.text_extraction(self, self.source_text_dict, response_content)
 
         # 检查回复内容
-        check_result, error_content = ResponseChecker.check_response_content(
-            self,
+        check_result, error_content = self.response_checker.check_response_content(
             self.config,
             self.placeholder_order,
             response_content,

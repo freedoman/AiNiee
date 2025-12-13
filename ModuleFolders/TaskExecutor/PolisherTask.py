@@ -28,6 +28,7 @@ class PolisherTask(Base):
         self.plugin_manager = plugin_manager
         self.request_limiter = request_limiter
         self.text_processor = PolishTextProcessor(self.config) # 文本处理器
+        self.response_checker = ResponseChecker() # 响应检查器
 
         # 提示词与信息内容存储
         self.messages = []
@@ -165,8 +166,7 @@ class PolisherTask(Base):
         response_dict = ResponseExtractor.text_extraction(self, text_dict, response_content)
 
         # 检查回复内容
-        check_result, error_content = ResponseChecker.check_polish_response_content(
-            self,
+        check_result, error_content = self.response_checker.check_polish_response_content(
             self.config,
             response_content,
             response_dict,

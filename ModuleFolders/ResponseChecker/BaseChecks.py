@@ -55,3 +55,126 @@ def check_empty_response(response_dict):
 
     return True
 
+# 检查边界标记完整性
+def check_boundary_markers(source_dict, response_dict):
+    """
+    检查译文中的边界标记是否与原文完全一致
+    
+    Args:
+        source_dict: 原文字典
+        response_dict: 译文字典
+    
+    Returns:
+        tuple: (是否通过, 详细错误信息)
+    """
+    import re
+    
+    for key in source_dict.keys():
+        if key not in response_dict:
+            continue
+            
+        source_text = source_dict[key]
+        response_text = response_dict[key]
+        
+        # 提取所有边界标记
+        source_markers = re.findall(r'<RUNBND\d+>', source_text)
+        response_markers = re.findall(r'<RUNBND\d+>', response_text)
+        
+        # 检查数量
+        if len(source_markers) != len(response_markers):
+            missing = set(source_markers) - set(response_markers)
+            extra = set(response_markers) - set(source_markers)
+            
+            error_msg = f"标记数量不匹配：原文{len(source_markers)}个，译文{len(response_markers)}个"
+            if missing:
+                error_msg += f"\n缺失: {', '.join(sorted(missing, key=lambda x: int(re.search(r'\d+', x).group())))}"
+            if extra:
+                error_msg += f"\n多余: {', '.join(sorted(extra, key=lambda x: int(re.search(r'\d+', x).group())))}"
+            
+            return False, error_msg
+        
+        # 检查标记顺序
+        if source_markers != response_markers:
+            # 找出顺序不一致的位置
+            diff_positions = []
+            for i, (src, rsp) in enumerate(zip(source_markers, response_markers)):
+                if src != rsp:
+                    diff_positions.append(f"位置{i+1}: 应为{src}实为{rsp}")
+            
+            if diff_positions:
+                error_msg = "标记顺序错误：\n" + "\n".join(diff_positions[:5])  # 最多显示5个
+                if len(diff_positions) > 5:
+                    error_msg += f"\n...还有{len(diff_positions)-5}处错误"
+                return False, error_msg
+    
+    return True, ""
+
+
+# 尝试自动修复边界标记问题
+def try_fix_boundary_markers(source_dict, response_dict, max_missing=3):
+    """
+    尝试自动修复译文中的边界标记问题
+    仅当缺失标记数量较少且没有顺序错误时才修复
+    
+    Args:
+        source_dict: 原文字典
+        response_dict: 译文字典
+        max_missing: 允许自动修复的最大缺失标记数
+    
+    Returns:
+        tuple: (是否修复成功, 修复后的response_dict或原response_dict, 修复说明)
+    """
+    import re
+    
+    fixed_dict = response_dict.copy()
+    fix_messages = []
+    
+    for key in source_dict.keys():
+        if key not in response_dict:
+            continue
+            
+        source_text = source_dict[key]
+        response_text = response_dict[key]
+        
+        source_markers = re.findall(r'<RUNBND\d+>', source_text)
+        response_markers = re.findall(r'<RUNBND\d+>', response_text)
+        
+        # 只处理缺失标记的情况，不处理顺序错误
+        missing = set(source_markers) - set(response_markers)
+        extra = set(response_markers) - set(source_markers)
+        
+        # 如果缺失太多或有顺序错误，不自动修复
+        if len(missing) > max_missing:
+            return False, response_dict, f"缺失标记过多({len(missing)}个)，不自动修复"
+        
+        if len(missing) == 0 and len(extra) == 0:
+            continue  # 没有缺失标记
+        
+        # 尝试简单修复：在译文末尾添加缺失的标记
+        if missing and not extra:
+            fixed_text = response_text
+            for marker in sorted(missing, key=lambda x: int(re.search(r'\d+', x).group())):
+                # 在合适的位置插入标记（简单策略：按编号顺序插入）
+                marker_num = int(re.search(r'\d+', marker).group())
+                
+                # 找到该标记在原文中的上下文
+                marker_idx = source_text.find(marker)
+                if marker_idx != -1:
+                    # 提取标记前后的文本片段作为定位参考
+                    before_text = source_text[max(0, marker_idx-20):marker_idx].strip()
+                    after_text = source_text[marker_idx+len(marker):marker_idx+len(marker)+20].strip()
+                    
+                    # 在译文中查找相似位置（这里使用简单策略：按比例插入）
+                    # 更复杂的实现可以使用模糊匹配
+                    insert_pos = int(len(fixed_text) * (marker_idx / len(source_text)))
+                    fixed_text = fixed_text[:insert_pos] + marker + fixed_text[insert_pos:]
+                    
+                    fix_messages.append(f"已在译文中插入{marker}")
+            
+            fixed_dict[key] = fixed_text
+    
+    if fix_messages:
+        return True, fixed_dict, "；".join(fix_messages)
+    
+    return False, response_dict, "无法自动修复"
+
