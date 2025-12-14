@@ -16,13 +16,14 @@ class DocxAccessor:
         # 默认选项：简化模式 conservative(保守)/balanced(平衡)/aggressive(激进)
         self.simplify_options = {
             "remove_colors": True,
+            "remove_fonts": True,  # 清除字体信息（后续统一设置）
             "strip_spacing": "all",  # 'none' | 'zeros' | 'all'
             "strip_char_width": "all",  # 'none' | 'default' | 'all'
             "enable_diff_log": True,
             "backup_before_simplify": True,  # 简化前自动备份源文件
             "protect_vertalign": True,  # 保护上标/下标 run 不被合并
             "simplify_mode": "aggressive",  # conservative | balanced | aggressive
-            "merge_mode": True,  # 启用合并段落模式
+            "merge_mode": False,  # 启用合并段落模式
             "mark_italic_as_red": True,  # 将斜体文本标记为红色（便于识别强调内容）
             **(simplify_options or {})
         }
@@ -38,6 +39,7 @@ class DocxAccessor:
         content = self._remove_redundant_colors(content)
         content = self._deduplicate_font_sizes(content)
         content = self._remove_char_width_attributes(content)
+        content = self._remove_font_attributes(content)  # 清除字体（后续统一设置）
         content = self._remove_empty_format_blocks(content)
         
         # 步骤2: 清理间距属性（仅 aggressive 模式）
@@ -103,6 +105,28 @@ class DocxAccessor:
         elif strip_width == "default":
             # 仅删除 w:w=100 的标签
             return re.sub(r'<w:w\s+w:val="100"\s*/>', '', content)
+    
+    def _remove_font_attributes(self, content: str) -> str:
+        """清除字体属性（w:rFonts），减少格式复杂度
+        
+        字体信息对翻译无意义，后续可以统一设置。
+        清除 w:rFonts 可以：
+        1. 大幅提高 run 合并率（不同字体的相同格式会被合并）
+        2. 减少 XML 体积
+        3. 简化格式处理逻辑
+        
+        根据 remove_fonts 配置：
+        - True: 删除所有 w:rFonts 标签（默认，推荐）
+        - False: 保留字体信息
+        """
+        if self.simplify_options.get("remove_fonts", True):
+            # 删除所有 w:rFonts 标签（包括自闭合和带子标签的）
+            # 匹配两种形式:
+            # 1. 自闭合: <w:rFonts ... />
+            # 2. 带子标签: <w:rFonts ...>...</w:rFonts>
+            content = re.sub(r'<w:rFonts[^>]*?/>', '', content)  # 自闭合
+            content = re.sub(r'<w:rFonts[^>]*?>.*?</w:rFonts>', '', content, flags=re.DOTALL)  # 带子标签
+        return content
     
     def _remove_spacing_attributes(self, content: str, mode: str = None) -> str:
         """清理 spacing 属性
@@ -212,15 +236,30 @@ class DocxAccessor:
         return has_italic and is_red
 
     def _merge_adjacent_format_runs(self, content: str) -> str:
-        """合并相邻的相同格式 run（保护上标/下标和空格）"""
-        pattern = r'(<w:r><w:rPr>([^<]*(?:<w:[^/>]+/>[^<]*)*?)</w:rPr><w:t[^>]*>([^<]*?)</w:t></w:r>)(\s*)(<w:r><w:rPr>\2</w:rPr><w:t[^>]*>([^<]*?)</w:t></w:r>)'
+        """合并相邻的相同格式 run
+        
+        改进策略：
+        - 只要两个 runs 的格式**完全相同**（包括 position/vertAlign 值），就可以合并
+        - 不再简单地"保护所有包含 position 的 runs"
+        - 这样可以合并"［2］"这样被拆分的引用标记
+        
+        注意：
+        - 允许标签之间有空白字符（\s*），以匹配格式化的 XML
+        - 使用 DOTALL 标志，允许 . 匹配换行符
+        """
+        # 修改正则：在标签之间添加 \s* 允许空白字符
+        pattern = r'(<w:r>\s*<w:rPr>([^<]*(?:<w:[^/>]+/>[^<]*)*?)</w:rPr>\s*<w:t[^>]*>([^<]*?)</w:t>\s*</w:r>)(\s*)(<w:r>\s*<w:rPr>\2</w:rPr>\s*<w:t[^>]*>([^<]*?)</w:t>\s*</w:r>)'
         
         def should_merge(format_str: str, spacing: str) -> bool:
-            """判断是否应该合并"""
-            # 保护上标/下标格式
-            if self.simplify_options.get("protect_vertalign", True):
-                if "vertAlign" in format_str or "position" in format_str:
-                    return False
+            """判断是否应该合并
+            
+            策略：
+            1. 如果两个 runs 的格式**完全相同**（正则已匹配 \2），就可以合并
+            2. 只保留实际空白间隔（避免合并跨行的内容）
+            
+            注：正则表达式的 \2 已经确保了两个 runs 的 <w:rPr> 内容完全一致，
+            包括 position、vertAlign 等所有属性值都相同，所以可以安全合并。
+            """
             # 保留有实际空白的间隔
             if spacing and spacing.strip():
                 return False

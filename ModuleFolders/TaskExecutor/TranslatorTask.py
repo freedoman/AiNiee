@@ -180,6 +180,25 @@ class TranslatorTask(Base):
 
         # 提取回复内容
         response_dict = ResponseExtractor.text_extraction(self, self.source_text_dict, response_content)
+        
+        # 调试: 检查提取的译文
+        print(f"\n[ResponseExtractor] 提取结果:")
+        print(f"  原文数量: {len(self.source_text_dict)}")
+        print(f"  译文数量: {len(response_dict)}")
+        empty_responses = sum(1 for v in response_dict.values() if not v or not v.strip())
+        if empty_responses > 0:
+            print(f"  ⚠️ {empty_responses} 个译文为空!")
+            # 显示哪些序号的译文是空的
+            empty_indices = [k for k, v in response_dict.items() if not v or not v.strip()]
+            print(f"  空译文序号: {empty_indices[:10]}")  # 最多显示10个
+            # 显示对应的原文
+            for idx in empty_indices[:3]:  # 显示前3个
+                if idx in self.source_text_dict:
+                    print(f"    序号{idx}原文: {self.source_text_dict[idx][:80]}...")
+            
+            # 显示 API 原始回复的一部分（用于判断是否包含这些译文）
+            print(f"\n  API原始回复（前500字符）:\n{response_content[:500]}...")
+            print(f"\n  API原始回复（最后500字符）:\n...{response_content[-500:]}")
 
         # 检查回复内容
         check_result, error_content = self.response_checker.check_response_content(
@@ -222,14 +241,54 @@ class TranslatorTask(Base):
         else:
             # 各种翻译后处理
             restore_response_dict = copy.copy(response_dict)
+            
+            # 检查后处理前的状态
+            empty_before = sum(1 for v in response_dict.values() if not v or not v.strip())
+            if empty_before > 0:
+                print(f"\n[TranslatorTask] ⚠️ 警告: 后处理前有 {empty_before} 个空译文!")
+            
             restore_response_dict = self.text_processor.restore_all(self.config, restore_response_dict, self.prefix_codes, self.suffix_codes, self.placeholder_order, self.affix_whitespace_storage)
+            
+            # 检查后处理后的状态
+            empty_after = sum(1 for v in restore_response_dict.values() if not v or not v.strip())
+            if empty_after > 0:
+                print(f"\n[TranslatorTask] ⚠️ 警告: 后处理后有 {empty_after} 个空译文!")
 
             # 更新译文结果到缓存数据中
-            for item, response in zip(self.items, restore_response_dict.values()):
+            print(f"\n[TranslatorTask] 更新译文到cache:")
+            print(f"  items数量: {len(self.items)}")
+            print(f"  response数量: {len(restore_response_dict)}")
+            
+            # 检查是否有空译文
+            empty_count = sum(1 for r in restore_response_dict.values() if not r or not r.strip())
+            same_count = sum(1 for item, resp in zip(self.items, restore_response_dict.values()) 
+                           if resp and resp.strip() == item.source_text.strip())
+            
+            if empty_count > 0:
+                print(f"  ⚠️ 警告: {empty_count} 个译文为空!")
+            if same_count > 0:
+                print(f"  ⚠️ 警告: {same_count} 个译文与原文相同!")
+            
+            for idx, (item, response) in enumerate(zip(self.items, restore_response_dict.values())):
+                # 打印前2项和所有空/相同的译文
+                should_print = (idx < 2) or (not response or not response.strip()) or (response.strip() == item.source_text.strip())
+                
+                if should_print:
+                    print(f"  第{idx+1}项:")
+                    print(f"    原文: {item.source_text[:80]}...")
+                    print(f"    译文: {response[:80] if response else 'None'}...")
+                    print(f"    译文==原文? {response.strip() == item.source_text.strip() if response else 'N/A'}")
+                
                 with item.atomic_scope():
                     item.model = self.config.model
-                    item.translated_text = response
-                    item.translation_status = TranslationStatus.TRANSLATED
+                    # 只有译文非空时才更新并标记为已翻译
+                    if response and response.strip():
+                        item.translated_text = response
+                        item.translation_status = TranslationStatus.TRANSLATED
+                    else:
+                        # 空译文保持 UNTRANSLATED 状态，下一轮会重新翻译
+                        print(f"    ⚠️ 跳过空译文，保持 UNTRANSLATED 状态")
+                        item.translation_status = TranslationStatus.UNTRANSLATED
 
 
             # 打印任务结果

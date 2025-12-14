@@ -84,7 +84,10 @@ class TaskExecutor(Base):
         output_config = {
             "translated_suffix": config.get('output_filename_suffix'),
             "bilingual_suffix": "_bilingual",
-            "bilingual_order": config.get('bilingual_text_order','translation_first') 
+            "bilingual_order": config.get('bilingual_text_order','translation_first'),
+            "response_check_switch": config.get('response_check_switch', {}),
+            "merge_mode": config.get('merge_mode', False),
+            "extract_formats": config.get('extract_formats', False)
         }
 
         # 写入文件
@@ -262,7 +265,17 @@ class TaskExecutor(Base):
             elif self.config.translation_prompt_selection["last_selected_id"] in (PromptBuilderEnum.COMMON, PromptBuilderEnum.COT, PromptBuilderEnum.THINK):
                 system = PromptBuilder.build_system(self.config, s_lang)
             else:
-                system = self.config.translation_prompt_selection["prompt_content"]
+                # 自定义提示词也需要进行边界标记过滤
+                custom_prompt = self.config.translation_prompt_selection["prompt_content"]
+                system = PromptBuilder._replace_language_placeholders(custom_prompt, self.config, s_lang)
+                
+                # 应用边界标记过滤逻辑
+                merge_mode = getattr(self.config, 'merge_mode', False)
+                extract_formats = getattr(self.config, 'extract_formats', False)
+                should_remove_markers = not (merge_mode and not extract_formats)
+                
+                if should_remove_markers:
+                    system = PromptBuilder._remove_boundary_marker_instructions(system)
             self.print("")
             if system:
                 self.info(f"本次任务使用以下基础提示词：\n{system}\n") 
@@ -302,7 +315,10 @@ class TaskExecutor(Base):
         output_config = {
              "translated_suffix": self.config.output_filename_suffix,
              "bilingual_suffix": "_bilingual",
-             "bilingual_order": self.config.bilingual_text_order 
+             "bilingual_order": self.config.bilingual_text_order,
+             "response_check_switch": getattr(self.config, 'response_check_switch', {}),
+             "merge_mode": getattr(self.config, 'merge_mode', False),
+             "extract_formats": getattr(self.config, 'extract_formats', False)
         }
 
         # 写入文件
@@ -443,7 +459,17 @@ class TaskExecutor(Base):
             if self.config.polishing_prompt_selection["last_selected_id"] == PromptBuilderEnum.POLISH_COMMON:
                 system = PromptBuilderPolishing.build_system(self.config)
             else:
-                system = self.config.polishing_prompt_selection["prompt_content"]
+                # 自定义润色提示词也需要进行边界标记过滤
+                custom_prompt = self.config.polishing_prompt_selection["prompt_content"]
+                system = custom_prompt  # 润色模式没有语言占位符，直接使用
+                
+                # 应用边界标记过滤逻辑
+                merge_mode = getattr(self.config, 'merge_mode', False)
+                extract_formats = getattr(self.config, 'extract_formats', False)
+                should_remove_markers = not (merge_mode and not extract_formats)
+                
+                if should_remove_markers:
+                    system = PromptBuilder._remove_boundary_marker_instructions(system)
             self.print("")
             if system:
                 self.info(f"本次任务使用以下基础提示词：\n{system}\n") 
@@ -465,7 +491,10 @@ class TaskExecutor(Base):
         output_config = {
              "translated_suffix": self.config.output_filename_suffix,
              "bilingual_suffix": "_bilingual",
-             "bilingual_order": self.config.bilingual_text_order 
+             "bilingual_order": self.config.bilingual_text_order,
+             "response_check_switch": getattr(self.config, 'response_check_switch', {}),
+             "merge_mode": getattr(self.config, 'merge_mode', False),
+             "extract_formats": getattr(self.config, 'extract_formats', False)
         }
 
         # 写入文件

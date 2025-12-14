@@ -13,6 +13,8 @@ from ModuleFolders.FileReader.ReaderUtil import detect_file_encoding, detect_lan
 @dataclass
 class InputConfig:
     input_root: Path
+    extract_formats: bool = False  # 是否提取格式信息用于位置映射（仅DOCX）
+    merge_mode: bool = False  # 是否使用段落合并模式（仅DOCX）
 
 
 @dataclass

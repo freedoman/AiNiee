@@ -85,9 +85,66 @@ class PromptBuilder(Base):
             result = PromptBuilder.think_system_en
             source_language = en_sl
             target_language = en_tl
+        else:
+            # 默认使用中文通用提示词
+            result = PromptBuilder.common_system_zh
 
+        # 替换语言占位符
+        result = result.replace("{source_language}", source_language).replace("{target_language}", target_language)
 
-        return result.replace("{source_language}", source_language).replace("{target_language}", target_language).strip()
+        # 边界标记使用逻辑：
+        # - merge_mode=True + extract_formats=False → 保留边界标记说明（段落合并但不提取格式，用标记定位）
+        # - merge_mode=True + extract_formats=True → 移除边界标记说明（段落合并且提取格式，直接用格式信息定位）
+        # - merge_mode=False → 移除边界标记说明（run级别翻译，直接对应每个w:t标签）
+        merge_mode = getattr(config, 'merge_mode', False)
+        extract_formats = getattr(config, 'extract_formats', False)
+        
+        # 只有 merge_mode=True 且 extract_formats=False 时才保留边界标记
+        should_remove_markers = not (merge_mode and not extract_formats)
+        
+        if should_remove_markers:
+            result = PromptBuilder._remove_boundary_marker_instructions(result)
+
+        return result.strip()
+
+    # 移除提示词中的边界标记说明（用于位置映射模式）
+    def _remove_boundary_marker_instructions(prompt_text: str) -> str:
+        """
+        当启用位置映射系统时，移除提示词中关于边界标记的所有说明。
+        位置映射系统不使用边界标记，因此这些说明会干扰LLM的翻译。
+        """
+        # 使用正则表达式移除边界标记相关的段落
+        # 匹配从"**极其重要：文本中包含形如"开始到下一个"###"或"**"（不含标记关键词）之前的所有内容
+        
+        # 方案：直接移除包含关键词的整个段落块
+        import re
+        
+        # 分段处理
+        paragraphs = prompt_text.split('\n\n')
+        filtered_paragraphs = []
+        
+        for para in paragraphs:
+            # 检查段落是否包含边界标记相关关键词
+            has_marker_keywords = any(keyword in para for keyword in [
+                'RUNBND', '边界标记', 'boundary marker', '格式定位标记',
+                '标记顺序', '标记的严格规则', '检查方法：', '高危情况', 'NOTRANS'
+            ])
+            
+            # 如果不包含这些关键词，保留段落
+            if not has_marker_keywords:
+                filtered_paragraphs.append(para)
+        
+        # 重新组合
+        result = '\n\n'.join(filtered_paragraphs)
+        
+        # 再次清理包含RUNBND的单行
+        lines = result.split('\n')
+        filtered_lines = []
+        for line in lines:
+            if 'RUNBND' not in line and '边界标记' not in line:
+                filtered_lines.append(line)
+        
+        return '\n'.join(filtered_lines)
 
     # 替换提示词文本中的源语言和目标语言占位符
     def _replace_language_placeholders(prompt_text: str, config: TaskConfig, source_lang: str) -> str:
@@ -770,6 +827,15 @@ class PromptBuilder(Base):
         else:
             custom_prompt = config.translation_prompt_selection["prompt_content"]
             system = PromptBuilder._replace_language_placeholders(custom_prompt, config, source_lang)
+            
+            # 自定义提示词也需要根据配置过滤边界标记说明
+            # 只有 merge_mode=True + extract_formats=False 时才保留边界标记
+            merge_mode = getattr(config, 'merge_mode', False)
+            extract_formats = getattr(config, 'extract_formats', False)
+            should_remove_markers = not (merge_mode and not extract_formats)
+            
+            if should_remove_markers:
+                system = PromptBuilder._remove_boundary_marker_instructions(system)
 
 
         # 如果开启术语表
@@ -864,7 +930,6 @@ class PromptBuilder(Base):
         if switch_A and switch_C:
             fol_prompt = PromptBuilder.build_modelResponsePrefix(config)
             messages.append({"role": "assistant", "content": fol_prompt})
-
 
         return messages, system, extra_log
 

@@ -69,19 +69,22 @@ class FileReader():
             reader_factory = partial(reader_class, **init_kwargs) if init_kwargs else reader_class
             self.reader_factory_dict[reader_class.get_project_type()] = reader_factory
 
-    def _get_reader_init_params(self, project_type, label_input_path):
-        input_config = InputConfig(Path(label_input_path))
+    def _get_reader_init_params(self, project_type, label_input_path, config=None):
+        # 从配置中读取 extract_formats 和 merge_mode(仅对DOCX有效)
+        extract_formats = config.get("extract_formats", False) if config else False
+        merge_mode = config.get("merge_mode", False) if config else False
+        input_config = InputConfig(Path(label_input_path), extract_formats=extract_formats, merge_mode=merge_mode)
         if project_type == AutoTypeReader.get_project_type():
-            reader_init_params_factory = partial(self._get_reader_init_params, label_input_path=label_input_path)
+            reader_init_params_factory = partial(self._get_reader_init_params, label_input_path=label_input_path, config=config)
             return ReaderInitParams(input_config=input_config, reader_init_params_factory=reader_init_params_factory)
         return ReaderInitParams(input_config=input_config)
 
     # 根据文件类型读取文件，并返回缓存对象
-    def read_files (self,translation_project,label_input_path, exclude_rule_str):
+    def read_files (self,translation_project,label_input_path, exclude_rule_str, config=None):
         # 检查传入的项目类型是否已经被注册。
         if translation_project in self.reader_factory_dict:
             # 获取初始化参数
-            reader_init_params = self._get_reader_init_params(translation_project, label_input_path)
+            reader_init_params = self._get_reader_init_params(translation_project, label_input_path, config)
             # 绑定配置，使工厂变成无参
             reader_factory = partial(self.reader_factory_dict[translation_project], **reader_init_params)
             # 创建对象，接收配置好、无参数的 reader_factory

@@ -50,6 +50,8 @@ class TranslationSettingsPage(QFrame, Base):
         self.add_auto_process_text_code_segment(self.container, config)
         self.add_widget_few_shot_and_example(self.container, config)
         self.container.addWidget(HorizontalSeparator())
+        self.add_widget_docx_options(self.container, config)
+        self.container.addWidget(HorizontalSeparator())
         self.add_widget_result_check(self.container, config)
 
         # 填充
@@ -230,6 +232,46 @@ class TranslationSettingsPage(QFrame, Base):
                 ),
                 widget_init,
                 widget_callback,
+            )
+        )
+
+    # DOCX文档选项
+    def add_widget_docx_options(self, parent, config) -> None:
+        def on_extract_formats_changed(widget, checked: bool) -> None:
+            config = self.load_config()
+            config["extract_formats"] = checked
+            self.save_config(config)
+
+        def on_merge_mode_changed(widget, checked: bool) -> None:
+            config = self.load_config()
+            config["merge_mode"] = checked
+            self.save_config(config)
+
+        def init_extract_formats(widget) -> None:
+            widget.set_checked(config.get("extract_formats", True))
+
+        def init_merge_mode(widget) -> None:
+            widget.set_checked(config.get("merge_mode", False))
+
+        parent.addWidget(
+            SwitchButtonCard(
+                self.tra("提取格式信息"),
+                self.tra(
+                    "启用后从DOCX文档中提取格式信息（粗体/斜体/颜色/上下标等），并自动启用位置映射系统以精确应用格式"
+                ),
+                init_extract_formats,
+                on_extract_formats_changed,
+            )
+        )
+
+        parent.addWidget(
+            SwitchButtonCard(
+                self.tra("段落合并模式"),
+                self.tra(
+                    "启用后将DOCX段落作为整体翻译（推荐），禁用后逐个文本片段(run)翻译（兼容旧版本）"
+                ),
+                init_merge_mode,
+                on_merge_mode_changed,
             )
         )
 

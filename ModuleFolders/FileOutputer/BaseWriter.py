@@ -38,6 +38,8 @@ class OutputConfig:
     bilingual_config: TranslationOutputConfig = None
     input_root: Path = None
     bilingual_order: BilingualOrder = field(default=BilingualOrder.TRANSLATION_FIRST)  # 双语排序配置
+    use_position_mapping: bool = False  # 是否使用位置映射应用格式（仅DOCX）
+    merge_mode: bool = False  # 是否使用段落合并模式（仅DOCX）
 
     def __post_init__(self):
         if self.translated_config is None:

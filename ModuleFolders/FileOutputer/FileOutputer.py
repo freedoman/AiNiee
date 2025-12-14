@@ -102,6 +102,12 @@ class FileOutputer:
         return WriterInitParams(output_config=output_config)
 
     def _get_writer_default_config(self, project_type, output_path: Path, input_path: Path, config: dict):
+        print(f"\n[_get_writer_default_config]")
+        print(f"  project_type: {project_type}")
+        print(f"  config中的merge_mode: {config.get('merge_mode', 'NOT_FOUND')}")
+        print(f"  config中的extract_formats: {config.get('extract_formats', 'NOT_FOUND')}")
+        print(f"  config中的use_position_mapping: {config.get('response_check_switch', {}).get('use_position_mapping', 'NOT_FOUND')}")
+        
         # 从配置中读取后缀，如果未配置则使用默认值
         translated_suffix = config.get("translated_suffix", "_translated")
         bilingual_suffix = config.get("bilingual_suffix", "_bilingual")
@@ -118,8 +124,22 @@ class FileOutputer:
 
         # 创建基础的 OutputConfig，包含新的配置项
         def create_output_config(**kwargs):
-            base_args = {"bilingual_order": bilingual_order, "input_root": input_path}
+            # 从配置中读取 extract_formats 和 merge_mode
+            extract_formats = config.get("extract_formats", False)
+            merge_mode = config.get("merge_mode", False)
+            
+            # 当 extract_formats=True 时，自动启用 use_position_mapping
+            # 因为提取格式信息必须通过位置映射系统才能正确应用
+            use_position_mapping = extract_formats
+            
+            base_args = {
+                "bilingual_order": bilingual_order, 
+                "input_root": input_path,
+                "use_position_mapping": use_position_mapping,  # 根据 extract_formats 自动决定
+                "merge_mode": merge_mode  # 从配置读取段落合并模式
+            }
             base_args.update(kwargs)
+            
             return OutputConfig(**base_args)
 
         if project_type == SrtWriter.get_project_type():

@@ -17,11 +17,17 @@ from ModuleFolders.ResponseChecker.AdvancedChecks import (
 )
 
 from ModuleFolders.BoundaryMarkerAlternative.marker_fixer import BoundaryMarkerFixer
+from ModuleFolders.BoundaryMarkerAlternative.position_mapper import PositionMapper, FormatMapping
+from ModuleFolders.BoundaryMarkerAlternative.format_extractor import FormatExtractor
 
 class ResponseChecker():
     def __init__(self):
-        # 初始化标记修复器
+        # 初始化标记修复器（快速修复方案）
         self.marker_fixer = BoundaryMarkerFixer(max_missing=3)
+        
+        # 初始化位置映射器（根本性方案）
+        self.position_mapper = PositionMapper(default_method="hybrid")
+        self.format_extractor = FormatExtractor()
 
     def check_response_content(self, config, placeholder_order, response_str, response_dict, source_text_dict, source_lang):
 
@@ -116,7 +122,86 @@ class ResponseChecker():
 
         # 全部检查通过
         return True, "检查无误"
-
+    
+    def apply_position_mapping(self, source_text_dict: dict, response_dict: dict, 
+                              format_info_dict: dict = None) -> dict:
+        """
+        应用位置映射到翻译结果
+        将格式从原文映射到译文（不使用边界标记）
+        
+        Args:
+            source_text_dict: 原文字典 {key: source_text}
+            response_dict: 译文字典 {key: target_text}
+            format_info_dict: 格式信息字典 {key: List[RunFormat]}
+                            如果为None，则从带标记文本中提取
+        
+        Returns:
+            映射结果字典 {key: FormatMapping}
+        """
+        mapping_results = {}
+        
+        for key in source_text_dict.keys():
+            if key not in response_dict:
+                continue
+            
+            source_text = source_text_dict[key]
+            target_text = response_dict[key]
+            
+            # 移除边界标记获取纯文本
+            import re
+            source_clean = re.sub(r'<RUNBND\d+>', '', source_text)
+            target_clean = re.sub(r'<RUNBND\d+>', '', target_text)
+            
+            # 获取或提取格式信息
+            if format_info_dict and key in format_info_dict:
+                source_runs = format_info_dict[key]
+            else:
+                # 从带标记文本反向推断格式（简化版）
+                source_runs = self._infer_format_from_markers(source_text)
+            
+            # 创建映射
+            mapping = FormatMapping(
+                source_text=source_clean,
+                target_text=target_clean,
+                source_runs=source_runs
+            )
+            
+            # 执行映射
+            result = self.position_mapper.map_format(mapping)
+            mapping_results[key] = result
+        
+        return mapping_results
+    
+    def _infer_format_from_markers(self, marked_text: str):
+        """从带标记文本推断格式信息（简化版）"""
+        import re
+        from ModuleFolders.BoundaryMarkerAlternative.position_mapper import RunFormat
+        
+        # 提取标记位置
+        markers = []
+        for match in re.finditer(r'<RUNBND(\d+)>', marked_text):
+            markers.append((int(match.group(1)), match.start()))
+        
+        # 移除标记
+        clean_text = re.sub(r'<RUNBND\d+>', '', marked_text)
+        
+        # 假设相邻标记之间是一个格式run
+        runs = []
+        for i in range(0, len(markers)-1, 2):
+            marker1_num, marker1_pos = markers[i]
+            marker2_num, marker2_pos = markers[i+1]
+            
+            # 计算在纯文本中的位置
+            offset1 = sum(1 for m in markers[:i] if m[1] < marker1_pos) * 10  # 粗略估计
+            offset2 = sum(1 for m in markers[:i+1] if m[1] < marker2_pos) * 10
+            
+            start = max(0, marker1_pos - offset1)
+            end = min(len(clean_text), marker2_pos - offset2)
+            
+            if start < end:
+                runs.append(RunFormat(start=start, end=end))
+        
+        return runs
 
     def check_polish_response_content(self, config, response_str, response_dict, source_text_dict):
 

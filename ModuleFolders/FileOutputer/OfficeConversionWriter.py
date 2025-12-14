@@ -19,6 +19,11 @@ class OfficeConversionWriter(BaseTranslatedWriter):
         self.tmp_directory = tmp_directory
         self.tmp_file_suffix = '.docx'
 
+        print(f"\n[OfficeConversionWriter.__init__]")
+        print(f"  output_config.merge_mode = {getattr(output_config, 'merge_mode', 'NOT_SET')}")
+        print(f"  output_config.use_position_mapping = {getattr(output_config, 'use_position_mapping', 'NOT_SET')}")
+        print(f"  即将创建 DocxWriter...")
+        
         self.docx_writer = DocxWriter(output_config)
         self.converter = OfficeFileConverter()
 
@@ -59,6 +64,9 @@ class OfficeConversionWriter(BaseTranslatedWriter):
             if not tmp_translation_docx_path.parent.exists():
                 tmp_translation_docx_path.parent.mkdir(parents=True)
             # 翻译中间格式文件
+            print(f"\n[OfficeConversionWriter] 调用DocxWriter")
+            print(f"  源文件: {tmp_source_docx_path.name}")
+            print(f"  目标文件: {tmp_translation_docx_path.name}")
             self.docx_writer.write_translated_file(tmp_translation_docx_path, cache_file, tmp_source_docx_path)
             if self.converter.can_convert(tmp_translation_docx_path, translation_file_path):
                 self.converter.convert_file(tmp_translation_docx_path, translation_file_path)

@@ -150,7 +150,8 @@ class StartupPage(Base, QWidget):
                 CacheProject = self.file_reader.read_files(
                     translation_project,
                     label_input_path,
-                    label_input_exclude_rule
+                    label_input_exclude_rule,
+                    config  # 传入配置以支持 extract_formats
                 )
                 self.cache_manager.load_from_project(CacheProject)
             else:  # "continue"
