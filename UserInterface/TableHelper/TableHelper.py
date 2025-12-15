@@ -10,6 +10,7 @@ class TableHelper():
 
     # 从表格加载数据
     def load_from_table(table: TableWidget, keys: list[str]) -> list[dict]:
+        from PyQt5.QtCore import Qt
         result = []
 
         # 遍历每一行
@@ -25,17 +26,35 @@ class TableHelper():
                 continue
 
             # 添加数据
-            result.append(
-                {
-                    keys[i]: (data[i].text().strip() if isinstance(data[i], QTableWidgetItem) else "")
-                    for i in range(len(keys))
-                }
-            )
+            row_data = {}
+            for i in range(len(keys)):
+                if isinstance(data[i], QTableWidgetItem):
+                    # 对于 count 字段，尝试转换为整数
+                    if keys[i] == "count":
+                        try:
+                            # 尝试从 EditRole 获取数字值
+                            edit_value = data[i].data(Qt.EditRole)
+                            if edit_value is not None and edit_value != "":
+                                row_data[keys[i]] = int(edit_value) if isinstance(edit_value, (int, float)) else int(str(edit_value))
+                            else:
+                                # 如果没有 EditRole，尝试从文本解析
+                                text = data[i].text().strip()
+                                row_data[keys[i]] = int(text) if text.isdigit() else 1
+                        except (ValueError, TypeError):
+                            row_data[keys[i]] = 1  # 默认值
+                    else:
+                        row_data[keys[i]] = data[i].text().strip()
+                else:
+                    row_data[keys[i]] = ""
+            
+            result.append(row_data)
 
         return result
 
     # 向表格更新数据
     def update_to_table(table: TableWidget, data: list[dict], keys: list[str]) -> None:
+        from PyQt5.QtCore import Qt
+        
         # 设置表格行数
         table.setRowCount(max(16, len(data)))
 
@@ -46,7 +65,17 @@ class TableHelper():
         # 遍历表格
         for row, v in enumerate(data):
             for col in range(table.columnCount()):
-                table.setItem(row, col, QTableWidgetItem(v.get(keys[col], "")))
+                value = v.get(keys[col], "")
+                item = QTableWidgetItem()
+                
+                # 如果是数字类型字段（如 count），设置为数字以便正确排序
+                if keys[col] == "count" and isinstance(value, (int, float)):
+                    item.setData(Qt.DisplayRole, str(value))
+                    item.setData(Qt.EditRole, value)
+                else:
+                    item.setText(str(value))
+                
+                table.setItem(row, col, item)
 
     # 从文件加载数据
     def load_from_file(path: str, keys: list[str]) -> list[dict]:

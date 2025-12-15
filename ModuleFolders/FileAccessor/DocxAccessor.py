@@ -213,10 +213,10 @@ class DocxAccessor:
         return str(soup) if modified else content
 
     def _is_italic_marked_run(self, t_tag: Tag) -> bool:
-        """检查 w:t 标签所在的 run 是否为红色斜体（已标记为不翻译内容）
+        """检查 w:t 标签所在的 run 是否为红色斜体（已标记为强调内容）
         
         Returns:
-            bool - True 表示该 run 包含斜体标记和红色，应该保持不翻译
+            bool - True 表示该 run 包含斜体标记和红色
         """
         run = t_tag.find_parent('w:r')
         if not run:
@@ -234,6 +234,64 @@ class DocxAccessor:
         is_red = color is not None and color.get('w:val', '').upper() == 'FF0000'
         
         return has_italic and is_red
+    
+    def _is_parenthetical_italic_in_merged(self, t_tag: Tag, all_t_tags: list) -> bool:
+        """检查 w:t 标签是否为括号中的红色斜体（merge_mode=True 专用）
+        
+        判断逻辑：
+        1. 当前 run 必须是红色斜体
+        2. 检查前后上下文是否在括号内
+        
+        Args:
+            t_tag: 当前的 w:t 标签
+            all_t_tags: 同一段落内所有 w:t 标签的列表（用于查找上下文）
+        
+        Returns:
+            bool - True 表示是括号中的红色斜体，应该添加 NOTRANS 标记
+        """
+        import re
+        
+        # 首先检查是否为红色斜体
+        if not self._is_italic_marked_run(t_tag):
+            return False
+        
+        # 获取当前标签在列表中的索引
+        try:
+            current_index = all_t_tags.index(t_tag)
+        except ValueError:
+            return False
+        
+        # 获取前后文本（向前和向后各查找5个标签）
+        context_range = 5
+        start_idx = max(0, current_index - context_range)
+        end_idx = min(len(all_t_tags), current_index + context_range + 1)
+        
+        # 收集上下文文本
+        context_texts = []
+        for i in range(start_idx, end_idx):
+            tag_text = all_t_tags[i].get_text()
+            if tag_text:
+                context_texts.append(str(tag_text))
+        
+        context = ''.join(context_texts)
+        current_text = t_tag.get_text() or ''
+        
+        # 检查是否在括号内：查找当前文本在上下文中的位置
+        # 支持多种括号：() [] 【】 （）
+        bracket_patterns = [
+            (r'\(', r'\)'),      # 英文圆括号
+            (r'\[', r'\]'),      # 英文方括号
+            (r'（', r'）'),      # 中文圆括号
+            (r'【', r'】'),      # 中文方括号
+        ]
+        
+        for open_bracket, close_bracket in bracket_patterns:
+            # 构建正则：开括号 + 任意内容（包含当前文本）+ 闭括号
+            pattern = f'{open_bracket}[^{close_bracket}]*?{re.escape(current_text)}[^{close_bracket}]*?{close_bracket}'
+            if re.search(pattern, context):
+                return True
+        
+        return False
 
     def _merge_adjacent_format_runs(self, content: str) -> str:
         """合并相邻的相同格式 run
@@ -384,8 +442,8 @@ class DocxAccessor:
                     if parts:
                         parts.append(f'<RUNBND{i}>')
                     
-                    # 然后添加文本，如果是红色斜体则用 <NOTRANS> 包裹
-                    if self._is_italic_marked_run(t_tags[i]):
+                    # 然后添加文本，如果是括号中的红色斜体则用 <NOTRANS> 包裹
+                    if self._is_parenthetical_italic_in_merged(t_tags[i], t_tags):
                         parts.append(f'<NOTRANS>{text}</NOTRANS>')
                     else:
                         parts.append(text)
@@ -403,11 +461,11 @@ class DocxAccessor:
                     })
         
         # 智能合并不完整段落 - Reader 和 Writer 都需要执行以保持一致性
-        if with_mapping:
+        # if with_mapping:
             # 需要同时合并 paragraphs 和 run_mapping
-            paragraphs, run_mapping = self._merge_incomplete_paragraphs_with_mapping(paragraphs, run_mapping)
-        else:
-            paragraphs = self._merge_incomplete_paragraphs(paragraphs)
+        #     paragraphs, run_mapping = self._merge_incomplete_paragraphs_with_mapping(paragraphs, run_mapping)
+        # else:
+        #     paragraphs = self._merge_incomplete_paragraphs(paragraphs)
         
         return (paragraphs, run_mapping, xml_soup) if with_mapping else paragraphs
 
@@ -453,8 +511,9 @@ class DocxAccessor:
         while i < len(paragraphs):
             current = paragraphs[i]
             
-            # 移除边界标记和NOTRANS标签后检查
-            clean_text = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', current)
+            # 移除边界标记后检查
+            # clean_text = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', current)
+            clean_text = re.sub(r'<RUNBND\d+>', '', current)
             
             # 检查当前段落是否不完整
             is_incomplete = False
@@ -466,7 +525,8 @@ class DocxAccessor:
             # 如果不完整且有下一段落
             if is_incomplete and i + 1 < len(paragraphs):
                 next_para = paragraphs[i + 1]
-                next_clean = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', next_para)
+                # next_clean = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', next_para)
+                next_clean = re.sub(r'<RUNBND\d+>', '', next_para)
                 
                 # 检查下一段落是否是新起点
                 is_new_start = False
@@ -529,8 +589,9 @@ class DocxAccessor:
             current = paragraphs[i]
             current_map = run_mapping[i]
             
-            # 移除边界标记和NOTRANS标签后检查
-            clean_text = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', current)
+            # 移除边界标记后检查
+            # clean_text = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', current)
+            clean_text = re.sub(r'<RUNBND\d+>', '', current)
             
             # 检查当前段落是否不完整
             is_incomplete = False
@@ -543,7 +604,8 @@ class DocxAccessor:
             if is_incomplete and i + 1 < len(paragraphs):
                 next_para = paragraphs[i + 1]
                 next_map = run_mapping[i + 1]
-                next_clean = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', next_para)
+                # next_clean = re.sub(r'<RUNBND\d+>|<NOTRANS>|</NOTRANS>', '', next_para)
+                next_clean = re.sub(r'<RUNBND\d+>', '', next_para)
                 
                 # 检查下一段落是否是新起点
                 is_new_start = False

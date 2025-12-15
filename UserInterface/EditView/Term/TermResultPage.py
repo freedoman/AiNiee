@@ -177,7 +177,8 @@ class TermResultPage(Base, QWidget):
                     new_entry = {
                         "src": src,
                         "dst": "",
-                        "info": result['type']
+                        "info": result['type'],
+                        "count": result.get('count', 1)  # 添加频次信息
                     }
                     prompt_dictionary_data.append(new_entry)
                     existing_srcs.add(src)

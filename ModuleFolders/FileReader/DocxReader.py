@@ -50,7 +50,10 @@ class DocxReader(BaseSourceReader):
             return self._read_individual_runs(file_path)
 
     def _read_individual_runs(self, file_path: Path) -> CacheFile:
-        """逐个 run 读取（提取所有 w:t 标签的文本）"""
+        """逐个 run 读取（提取所有 w:t 标签的文本）
+        
+        对于括号中的红色斜体文本，添加 <NOTRANS> 标记以防止翻译
+        """
         items = []
         
         print(f"\n[DocxReader._read_individual_runs]")
@@ -77,6 +80,9 @@ class DocxReader(BaseSourceReader):
                 if isinstance(match.string, str) and match.string.strip():
                     text = str(match.string)
                     if text not in ("", "\n", " ", '\xa0'):
+                        # 检查是否为括号中的红色斜体（不翻译内容）
+                        if self._is_parenthetical_italic(match, t_tags):
+                            text = f'<NOTRANS>{text}</NOTRANS>'
                         xml_name_items.append(text)
             
             # 调试信息
@@ -95,6 +101,63 @@ class DocxReader(BaseSourceReader):
         
         print(f"\n  总共创建 {len(items)} 个 CacheItem")
         return CacheFile(items=items)
+    
+    def _is_parenthetical_italic(self, t_tag, all_t_tags: list) -> bool:
+        """检查 w:t 标签是否为括号中的红色斜体
+        
+        判断逻辑：
+        1. 当前 run 必须是红色斜体
+        2. 检查前后上下文是否在括号内
+        
+        Args:
+            t_tag: 当前的 w:t 标签
+            all_t_tags: 所有 w:t 标签的列表（用于查找上下文）
+        
+        Returns:
+            bool - True 表示是括号中的红色斜体，应该添加 NOTRANS 标记
+        """
+        import re
+        
+        # 首先检查是否为红色斜体
+        if not self.file_accessor._is_italic_marked_run(t_tag):
+            return False
+        
+        # 获取当前标签在列表中的索引
+        try:
+            current_index = all_t_tags.index(t_tag)
+        except ValueError:
+            return False
+        
+        # 获取前后文本（向前和向后各查找5个标签）
+        context_range = 5
+        start_idx = max(0, current_index - context_range)
+        end_idx = min(len(all_t_tags), current_index + context_range + 1)
+        
+        # 收集上下文文本
+        context_texts = []
+        for i in range(start_idx, end_idx):
+            if all_t_tags[i].string:
+                context_texts.append(str(all_t_tags[i].string))
+        
+        context = ''.join(context_texts)
+        current_text = str(t_tag.string) if t_tag.string else ''
+        
+        # 检查是否在括号内：查找当前文本在上下文中的位置
+        # 支持多种括号：() [] 【】 （）
+        bracket_patterns = [
+            (r'\(', r'\)'),      # 英文圆括号
+            (r'\[', r'\]'),      # 英文方括号
+            (r'（', r'）'),      # 中文圆括号
+            (r'【', r'】'),      # 中文方括号
+        ]
+        
+        for open_bracket, close_bracket in bracket_patterns:
+            # 构建正则：开括号 + 任意内容（包含当前文本）+ 闭括号
+            pattern = f'{open_bracket}[^{close_bracket}]*?{re.escape(current_text)}[^{close_bracket}]*?{close_bracket}'
+            if re.search(pattern, context):
+                return True
+        
+        return False
 
     def _read_merged_paragraphs(self, file_path: Path) -> CacheFile:
         """按合并段落读取，每个段落作为一个 CacheItem，可选提取格式信息"""

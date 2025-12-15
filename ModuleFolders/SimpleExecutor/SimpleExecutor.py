@@ -591,12 +591,24 @@ class SimpleExecutor(Base):
 
         self.info("▶️ 开始执行【基于上下文翻译并保存术语】任务...")
 
-        # 提取所有唯一的“所在原文”(context)
+        # 提取所有唯一的"所在原文"(context)
         unique_contexts = sorted(list(set(result['context'] for result in extraction_results)))
         if not unique_contexts:
             self.warning("术语翻译任务中止：没有有效的上下文原文。")
             self.emit(Base.EVENT.TERM_TRANSLATE_SAVE_DONE, {"status": "no_result", "message": "没有有效的上下文"})
             return
+
+        # 创建上下文到术语信息的映射（包含频次）
+        context_to_terms = {}
+        for result in extraction_results:
+            context = result['context']
+            if context not in context_to_terms:
+                context_to_terms[context] = []
+            context_to_terms[context].append({
+                'term': result['term'],
+                'type': result['type'],
+                'count': result.get('count', 1)
+            })
 
         # 准备翻译配置
         config = TaskConfig()
@@ -621,7 +633,7 @@ class SimpleExecutor(Base):
         print(f"└─ 使用线程池并发数: {max_threads}")
 
         # 定义用于线程池的工作函数
-        def process_batch(batch_contexts, batch_num, total_batches):
+        def process_batch(batch_contexts, batch_num, total_batches, context_terms_map):
             """处理单个批次的请求、解析和返回结果"""
             log_header = f" 批次 {batch_num}/{total_batches} "
             print(f"\n╔{'═' * (LOG_WIDTH-2)}")
@@ -681,7 +693,15 @@ class SimpleExecutor(Base):
                     if len(parts) == 3:
                         src, dst, info = [p.strip() for p in parts]
                         if src:
-                            batch_parsed_terms.append({"src": src, "dst": dst, "info": info})
+                            # 从原始提取结果中查找对应术语的频次
+                            count = 1  # 默认值
+                            for context in batch_contexts:
+                                if context in context_terms_map:
+                                    for term_info in context_terms_map[context]:
+                                        if term_info['term'] == src:
+                                            count = term_info['count']
+                                            break
+                            batch_parsed_terms.append({"src": src, "dst": dst, "info": info, "count": count})
                     else:
                         self.warning(f"解析失败，批次 {batch_num} 中格式不符: {line}")
                         warnings_in_batch = True
@@ -708,8 +728,8 @@ class SimpleExecutor(Base):
                 start_index = i * MAX_LINES
                 end_index = start_index + MAX_LINES
                 batch_contexts = unique_contexts[start_index:end_index]
-                # 提交任务到线程池
-                future = executor.submit(process_batch, batch_contexts, i + 1, num_batches)
+                # 提交任务到线程池，传递 context_to_terms 映射
+                future = executor.submit(process_batch, batch_contexts, i + 1, num_batches, context_to_terms)
                 futures.append(future)
             
             # 获取已完成任务的结果

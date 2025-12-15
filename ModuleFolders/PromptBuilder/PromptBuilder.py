@@ -127,7 +127,7 @@ class PromptBuilder(Base):
             # 检查段落是否包含边界标记相关关键词
             has_marker_keywords = any(keyword in para for keyword in [
                 'RUNBND', '边界标记', 'boundary marker', '格式定位标记',
-                '标记顺序', '标记的严格规则', '检查方法：', '高危情况', 'NOTRANS'
+                '标记顺序', '标记的严格规则', '检查方法：', '高危情况'
             ])
             
             # 如果不包含这些关键词，保留段落

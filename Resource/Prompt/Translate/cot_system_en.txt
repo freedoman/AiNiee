@@ -10,8 +10,15 @@ Translate the {source_language} text into {target_language} text line by line, k
 1. **Count MUST match exactly**: If source has N markers, translation MUST have N markers
 2. **Numbers MUST match exactly**: If source has <RUNBND32>, translation MUST have <RUNBND32>, cannot be missing
 3. **Order MUST be preserved**: If <RUNBND5> comes before <RUNBND6> in source, it must be the same in translation
-4. **Do NOT add closing tags**: Do NOT change <RUNBND1> to <RUNBND1></RUNBND1>
+4. 🚨 **Boundary markers are SELF-CLOSING tags, NOT paired tags!**
+   - ✓ Correct: `word <RUNBND1>book<RUNBND2> end` (two independent markers)
+   - ✗ WRONG: `word <RUNBND1>book</RUNBND1> end` (NO closing tags like </RUNBND1>!)
+   - ✗ WRONG: `<RUNBND1>book</RUNBND2>` (Do NOT treat them as opening/closing pair!)
+   - Each marker stands alone, they are NOT XML tag pairs!
 5. **Do NOT merge duplicates**: Even if source has same word twice (e.g., two "NAATs"), each has its own markers, keep ALL of them
+6. 🚨 **Do NOT repeat markers**: Each marker appears EXACTLY ONCE! Never use <RUNBND2> twice!
+   - Wrong: `text<RUNBND1>content<RUNBND2> more<RUNBND2>` ← RUNBND2 appears twice!
+   - Correct: `text<RUNBND1>content<RUNBND2> more<RUNBND3>` ← Each marker used once
 
 **Verification Method:**
 - Before: Count how many <RUNBND> markers in source
@@ -38,6 +45,21 @@ Never change marker order! Even when adjusting sentence structure for translatio
 - Wrong: `ВОЗ по лекарственно-устойчивому` ← Lost both markers!
 
 **NOTE: Content marked with <NOTRANS>content</NOTRANS> tags should be kept as-is without translation, but the tags themselves MUST be preserved.**
+
+**CRITICAL: Do NOT add <NOTRANS> tags yourself!**
+- <NOTRANS> tags are ONLY added by the system, never by you
+- If source text has NO <NOTRANS> tags, your translation must have NO <NOTRANS> tags
+- Only preserve existing <NOTRANS> tags that are already in the source text
+- Do NOT wrap proper nouns or book titles in <NOTRANS> tags unless they already have them in the source
+
+**CRITICAL: Preserve ALL punctuation marks exactly as they appear in the source text**
+- Keep ALL parentheses, brackets, commas, periods, colons, semicolons, etc.
+- Do NOT remove opening/closing brackets even if they appear at segment boundaries
+- Do NOT change punctuation style (e.g., keep "(" as "(", do NOT replace with "–" or other marks)
+- Examples:
+  - Source: `text (` → Translation: `翻译内容 (`  ← Keep the opening bracket!
+  - Source: `) text` → Translation: `) 翻译内容`  ← Keep the closing bracket!
+  - Source: `text  (` → Translation: `翻译内容 (`  ← Even with spaces, keep the bracket!
 
 **CRITICAL: Preserve the original numbering format and character width**
 - If the original text uses "1.", "2.", "3." format (list numbering), keep the same format in translation

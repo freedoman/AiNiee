@@ -91,8 +91,14 @@ class DocxWriter(BaseTranslatedWriter):
                     
                     # 从当前位置向后查找匹配的cache项
                     for content_index in range(start_index, len(items)):
-                        if match.string == items[content_index].source_text:
-                            match.string = items[content_index].final_text
+                        # 移除 NOTRANS 标记后比较
+                        import re
+                        source_text_clean = re.sub(r'<NOTRANS>(.*?)</NOTRANS>', r'\1', items[content_index].source_text)
+                        
+                        if match.string == source_text_clean:
+                            # 写入时也移除 NOTRANS 标记
+                            final_text_clean = re.sub(r'<NOTRANS>(.*?)</NOTRANS>', r'\1', items[content_index].final_text)
+                            match.string = final_text_clean
                             start_index = content_index + 1
                             matched = True
                             matched_count += 1

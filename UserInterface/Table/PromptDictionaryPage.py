@@ -16,8 +16,8 @@ from UserInterface import AppFluentWindow
 
 class PromptDictionaryPage(QFrame, Base):
 
-    KEYS = ("src", "dst", "info",)
-    COLUMN_NAMES = {0: "原文",1: "译文",2: "描述",}
+    KEYS = ("src", "dst", "info", "count")
+    COLUMN_NAMES = {0: "原文",1: "译文",2: "描述",3: "频次"}
 
     def __init__(self, text: str, window: AppFluentWindow) -> None:
         super().__init__(parent=window)

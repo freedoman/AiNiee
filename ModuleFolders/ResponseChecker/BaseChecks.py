@@ -68,6 +68,7 @@ def check_boundary_markers(source_dict, response_dict):
         tuple: (是否通过, 详细错误信息)
     """
     import re
+    from collections import Counter
     
     for key in source_dict.keys():
         if key not in response_dict:
@@ -76,9 +77,27 @@ def check_boundary_markers(source_dict, response_dict):
         source_text = source_dict[key]
         response_text = response_dict[key]
         
-        # 提取所有边界标记
+        # 🚨 新增：检查译文中是否有错误的闭合标签(边界标记应该是自闭合的,不能有</RUNBND>)
+        closing_tags = re.findall(r'</RUNBND\d+>', response_text)
+        if closing_tags:
+            error_msg = f"边界标记格式错误：检测到闭合标签(边界标记应该是自闭合的单标签,不能成对使用)：\n"
+            error_msg += "\n".join(sorted(set(closing_tags), key=lambda x: int(re.search(r'\d+', x).group())))
+            error_msg += "\n\n正确格式: <RUNBND1>内容<RUNBND2>"
+            error_msg += "\n错误格式: <RUNBND1>内容</RUNBND1> (不要使用闭合标签!)"
+            return False, error_msg
+        
+        # 提取所有边界标记(开标签)
         source_markers = re.findall(r'<RUNBND\d+>', source_text)
         response_markers = re.findall(r'<RUNBND\d+>', response_text)
+        
+        # 🚨 检查译文中是否有重复的标记
+        response_counter = Counter(response_markers)
+        duplicates = {marker: count for marker, count in response_counter.items() if count > 1}
+        
+        if duplicates:
+            dup_list = [f"{marker}(出现{count}次)" for marker, count in sorted(duplicates.items(), key=lambda x: int(re.search(r'\d+', x[0]).group()))]
+            error_msg = f"译文中存在重复的边界标记（每个标记只能出现一次）：\n" + "\n".join(dup_list)
+            return False, error_msg
         
         # 检查数量
         if len(source_markers) != len(response_markers):
